@@ -1,0 +1,13 @@
+{
+  "name": "ludo-multiplayer-root",
+  "version": "1.0.0",
+  "description": "Ludo Game Root Package",
+  "scripts": {
+    "install": "cd website && npm install && cd ../server && npm install",
+    "build": "cd website && npm run build",
+    "start": "cd server && node server.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
