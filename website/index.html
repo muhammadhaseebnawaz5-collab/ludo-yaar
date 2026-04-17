@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Ludo Star — Play With Friends</title>
+    <meta name="description" content="Play Ludo Star with friends online. Create private tables, invite friends directly, and enjoy real-time multiplayer Ludo.">
+    <link rel="stylesheet" href="./style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+</head>
+<body>
+<div id="app">
+    <div class="game-container">
+
+        <!-- ══════════════════════════════════════════
+             SCREEN 1: PLAY WITH FRIENDS LOBBY
+        ══════════════════════════════════════════ -->
+        <div id="lobbyScreen" class="screen active">
+            <!-- Decorative floating circles -->
+            <div class="deco-circle dc1"></div>
+            <div class="deco-circle dc2"></div>
+            <div class="deco-circle dc3"></div>
+
+            <div class="lobby-content">
+                <div class="lobby-title-row">
+                    <span class="lobby-emoji">🎲</span>
+                    <h1 class="lobby-title">PLAY WITH FRIENDS</h1>
+                    <span class="lobby-emoji">🎲</span>
+                </div>
+
+                <!-- Player name input -->
+                <div class="lobby-name-row">
+                    <input id="playerNameInput" type="text" maxlength="12" placeholder="Enter your name…" class="name-input" autocomplete="off">
+                </div>
+
+                <!-- Player count buttons -->
+                <div class="section-label">SELECT PLAYERS</div>
+                <div class="player-count-row" id="playerCountRow">
+                    <button class="count-btn active" data-count="2" id="btn2P">2 PLAYER</button>
+                    <button class="count-btn" data-count="3" id="btn3P">3 PLAYER</button>
+                    <button class="count-btn" data-count="4" id="btn4P">4 PLAYER</button>
+                </div>
+
+                <!-- Entry fee -->
+                <div class="fee-row">
+                    <span class="fee-label">ENTRY FEE</span>
+                    <span class="fee-value">FREE 🎉</span>
+                </div>
+
+                <!-- START button -->
+                <button id="btnStart" class="btn-start">▶ START</button>
+
+                <!-- Divider -->
+                <div class="lobby-divider">
+                    <div class="divider-line"></div>
+                    <span class="divider-text">OR</span>
+                    <div class="divider-line"></div>
+                </div>
+
+                <!-- Join by code -->
+                <div class="join-row">
+                    <span class="join-hint">Have a <strong>PRIVATE TABLE CODE?</strong></span>
+                    <button id="btnOpenJoin" class="btn-join">→ Join</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ══════════════════════════════════════════
+             SCREEN 2: JOIN CODE POP-UP (overlay)
+        ══════════════════════════════════════════ -->
+        <div id="joinPopup" class="popup-overlay hidden">
+            <div class="popup-card join-card">
+                <button class="popup-close" id="btnCloseJoin">✕</button>
+                <div class="popup-title">🔑 Enter Table Code</div>
+                <p class="popup-sub">Paste the code shared by your host</p>
+                <input id="joinCodeInput" type="text" maxlength="8" placeholder="e.g. A1B2C3" class="code-input" autocomplete="off">
+                <button id="btnConfirmJoin" class="btn-confirm-join">Join Table</button>
+                <p id="joinError" class="join-error hidden">Code not found. Check and try again.</p>
+            </div>
+        </div>
+
+        <!-- ══════════════════════════════════════════
+             SCREEN 3: WAITING ROOM (shown over dimmed board canvas)
+        ══════════════════════════════════════════ -->
+        <div id="waitingRoom" class="screen hidden waiting-overlay">
+            <div class="waiting-card">
+                <!-- Table code -->
+                <div class="wc-title">TABLE CODE</div>
+                <div class="wc-code-row">
+                    <span id="displayTableCode" class="wc-code">——</span>
+                    <button id="btnCopyCode" class="btn-copy" title="Copy code">📋</button>
+                </div>
+                <div id="copyConfirm" class="copy-confirm hidden">Copied!</div>
+
+                <!-- Avatar slots -->
+                <div class="slots-row" id="slots">
+                    <!-- filled by JS -->
+                </div>
+
+                <!-- Invite / Share row -->
+                <div class="invite-row">
+                    <button id="btnInviteFriends" class="btn-action invite">👥 Invite Friends</button>
+                    <button id="btnShare" class="btn-action share">📤 Share Code</button>
+                </div>
+
+                <!-- Host-only: manual start -->
+                <button id="btnStartGame" class="btn-start-game hidden">▶ START GAME</button>
+                <p id="waitP" class="wait-hint">Waiting for host to start…</p>
+            </div>
+        </div>
+
+        <!-- ══════════════════════════════════════════
+             SCREEN 4: FRIENDS LIST POP-UP (overlay)
+        ══════════════════════════════════════════ -->
+        <div id="friendsPopup" class="popup-overlay hidden">
+            <div class="popup-card friends-card">
+                <button class="popup-close" id="btnCloseFriends">✕</button>
+                <div class="popup-title">👥 Friends</div>
+                <div class="friends-search-row">
+                    <input id="friendSearchInput" placeholder="Search friends…" class="friend-search" autocomplete="off">
+                </div>
+                <ul id="friendsList" class="friends-list">
+                    <!-- populated by JS -->
+                </ul>
+                <p id="noFriendsMsg" class="no-friends hidden">No friends yet. Play a game and they'll appear here!</p>
+            </div>
+        </div>
+
+        <!-- ══════════════════════════════════════════
+             SCREEN 5: INCOMING INVITE BANNER (overlay)
+        ══════════════════════════════════════════ -->
+        <div id="inviteBanner" class="invite-banner hidden">
+            <div class="invite-banner-card">
+                <div class="ib-avatar" id="ibAvatar">🎮</div>
+                <div class="ib-text">
+                    <div id="ibSenderName" class="ib-name">Someone</div>
+                    <div class="ib-sub">invited you to their table!</div>
+                </div>
+                <div class="ib-actions">
+                    <button id="btnAcceptInvite" class="ib-btn accept">Accept</button>
+                    <button id="btnDeclineInvite" class="ib-btn decline">Decline</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- The actual Ludo game canvas (hidden until game starts) -->
+        <canvas id="gameCanvas"></canvas>
+    </div>
+</div>
+
+<script src="https://cdn.socket.io/4.8.0/socket.io.min.js"></script>
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>
