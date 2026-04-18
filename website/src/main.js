@@ -547,8 +547,9 @@ function handleInput(e) {
     // Crown / Roll
     {
         const p       = game.currentPlayer;
-        const isTop   = p <= 1;
-        const isRight = p === 1 || p === 3;
+        const v       = game.getVisualIndex(p);
+        const isTop   = v <= 1;
+        const isRight = v === 1 || v === 2;
         const clX = isRight ? SCREEN_W - 238 : 92;
         const clY = isTop ? 18 : SCREEN_H - 152;
         const crX = clX + 62, crY = clY + 23;

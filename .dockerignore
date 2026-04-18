@@ -1,0 +1,8 @@
+node_modules
+website/node_modules
+server/node_modules
+website/dist
+.git
+package-lock.json
+website/package-lock.json
+server/package-lock.json

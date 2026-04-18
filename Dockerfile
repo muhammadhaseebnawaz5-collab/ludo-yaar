@@ -3,24 +3,24 @@ FROM node:22.14.0-bookworm
 
 WORKDIR /app
 
-# Copy root package files
+# Copy package files first to leverage Docker layer caching
 COPY package.json ./
+COPY website/package.json ./website/
+COPY server/package.json ./server/
 
-# Copy the entire project
-COPY . .
-
-# Clean up any existing node_modules or lockfiles to avoid architecture mismatches
-RUN rm -rf node_modules website/node_modules server/node_modules package-lock.json website/package-lock.json server/package-lock.json
-
-# Install dependencies for all parts of the app
-# The root install script handles subdirectories: "cd website && npm install && cd ../server && npm install"
+# Install dependencies explicitly for each part to ensure native bindings match Linux
+RUN cd website && npm install --include=optional
+RUN cd server && npm install
 RUN npm install
+
+# Copy the entire project code
+COPY . .
 
 # Build the website
 RUN cd website && npm run build
 
-# Expose the port the server runs on (adjust if different)
+# Port setup (Railway provides PORT environment variable)
 EXPOSE 3000
 
-# Start the server
+# Start the server using the root start script
 CMD ["npm", "start"]

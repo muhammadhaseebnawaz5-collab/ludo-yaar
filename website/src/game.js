@@ -157,6 +157,12 @@ export class LudoGame {
         ];
     }
 
+    // Maps logical player index (0-3) to visual position (0=TL, 1=TR, 2=BR, 3=BL)
+    // so that the clientPlayer is always at index 3 (Bottom-Left).
+    getVisualIndex(p) {
+        return (p - this.clientPlayer + 3 + 4) % 4;
+    }
+
     // ─── BOARD DRAWING ──────────────────────────────────────────────
     drawBoard(ctx) {
         const { boardX: bx, boardY: by, cell: C } = this;
@@ -530,8 +536,13 @@ export class LudoGame {
         ctx.strokeStyle = 'rgba(255,255,255,0.07)';
         ctx.lineWidth = 1;
         ctx.beginPath(); ctx.moveTo(0, 108); ctx.lineTo(SCREEN_W, 108); ctx.stroke();
-        if (0 < this.playerCount) this.drawPlayerCard(ctx, 0);
-        if (1 < this.playerCount) this.drawPlayerCard(ctx, 1);
+        
+        // Draw players who are visually at the top (Visual 0 and 1)
+        for (let p = 0; p < 4; p++) {
+            if (p >= this.playerCount) continue;
+            const v = this.getVisualIndex(p);
+            if (v === 0 || v === 1) this.drawPlayerCard(ctx, p, v);
+        }
     }
 
     // ─── TILE GLOWS ──────────────────────────────────────────────────
@@ -577,8 +588,12 @@ export class LudoGame {
         ctx.lineWidth = 1;
         ctx.beginPath(); ctx.moveTo(0, barY); ctx.lineTo(SCREEN_W, barY); ctx.stroke();
 
-        if (2 < this.playerCount) this.drawPlayerCard(ctx, 2);
-        if (3 < this.playerCount) this.drawPlayerCard(ctx, 3);
+        // Draw players who are visually at the bottom (Visual 2 and 3)
+        for (let p = 0; p < 4; p++) {
+            if (p >= this.playerCount) continue;
+            const v = this.getVisualIndex(p);
+            if (v === 2 || v === 3) this.drawPlayerCard(ctx, p, v);
+        }
 
         // Graphics-based EMOJI / CHAT / MIC / SPEAKER buttons at very bottom
         const buttons = [
@@ -641,9 +656,9 @@ export class LudoGame {
     }
 
     // ─── PLAYER CARD ─────────────────────────────────────────────────
-    drawPlayerCard(ctx, i) {
-        const isTop    = i <= 1;
-        const isRight  = i === 1 || i === 3;
+    drawPlayerCard(ctx, i, v) {
+        const isTop    = v <= 1;
+        const isRight  = v === 1 || v === 2; // Remapped right side
         const isActive = i === this.currentPlayer;
         const color    = PLAYER_COLORS[i];
         const name     = PLAYER_NAMES[i];
@@ -723,12 +738,11 @@ export class LudoGame {
     drawDiceArea(ctx) {
         if (this.gameState === 'setup') return;
         const p       = this.currentPlayer;
-        const isTop   = p <= 1;
-        const isRight = p === 1 || p === 3;
+        const v       = this.getVisualIndex(p);
+        const isTop   = v <= 1;
+        const isRight = v === 1 || v === 2;
 
         // Cluster anchor: dice left, crown right
-        // For left players  → cluster starts at x=90
-        // For right players → cluster starts at x=SCREEN_W-240
         const clX = isRight ? SCREEN_W - 238 : 92;
         const clY = isTop ? 18 : SCREEN_H - 152;
 
