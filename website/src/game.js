@@ -2,7 +2,8 @@ import {
     SCREEN_W, SCREEN_H, BOARD_X, BOARD_Y, BOARD_SIZE, CELL, COLORS, 
     PLAYER_COLORS, PLAYER_LIGHT, PLAYER_DARK, PLAYER_NAMES, HOME_POSITIONS, 
     STAR_POSITIONS, MAIN_PATH, HOME_STRETCHES,
-    PLAYER_START_INDICES, PLAYER_HOME_ENTRIES, SAFE_INDICES, TEAM_MAP
+    PLAYER_START_INDICES, PLAYER_HOME_ENTRIES, SAFE_INDICES, TEAM_MAP,
+    PLAYER_ROTATIONS, BOARD_X, BOARD_Y, BOARD_SIZE
 } from './constants.js';
 import { 
     DiceAnimation, Token, ChatSystem, ProfileAvatar, AudioControl,
@@ -434,28 +435,35 @@ export class LudoGame {
         ctx.fillStyle = COLORS.BG;
         ctx.fillRect(0, 0, SCREEN_W, SCREEN_H);
 
-        // Draw static board (no rotation)
+        // --- POV BOARD ROTATION ---
+        const cx = BOARD_X + BOARD_SIZE / 2;
+        const cy = BOARD_Y + BOARD_SIZE / 2;
+        const angle = PLAYER_ROTATIONS[this.clientPlayer] || 0;
+
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.rotate(angle);
+        ctx.translate(-cx, -cy);
+
+        // Draw rotated game elements
         this.drawBoard(ctx);
-        
-        // Highlight active token positions (Glow on the tiles they sit on)
         this.drawTokenGlows(ctx);
-
-        // Draw tokens
         this.tokens.forEach((pt, p) => { if (p < this.playerCount) pt.forEach(t => t.draw(ctx)); });
+        this.junctionArrows.draw(ctx);
+        
+        ctx.restore();
+        // --- END ROTATION ---
 
-        // UI Overlays
+        // UI Overlays (Not rotated)
         this.drawTopBar(ctx);
         this.drawBottomBar(ctx);
         this.drawDiceArea(ctx);
-        // this.drawTurnIndicator(ctx); // Removed text-based turn indicator to use avatar pulse
         this.drawParticles(ctx);
 
         this.moveSelection.draw(ctx);
-        this.junctionArrows.draw(ctx);
 
         if (this.chat.visible) this.chat.draw(ctx, 10, 390, 290, 160);
         
-        // Emoji panel slightly adjusted position
         if (this.emojiPanel.visible) this.emojiPanel.draw(ctx, 20, 520);
         this.emojiPanel.drawFloating(ctx);
 

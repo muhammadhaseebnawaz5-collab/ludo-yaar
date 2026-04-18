@@ -212,6 +212,28 @@ canvas {
 .fee-label { font-size: 12px; font-weight: 800; letter-spacing: 1px; color: rgba(255,255,255,0.5); }
 .fee-value { font-size: 14px; font-weight: 900; color: #ffe066; }
 
+/* Team Up button */
+.btn-team-up {
+  width: 100%;
+  padding: 12px;
+  border-radius: var(--radius-md);
+  border: 2px solid rgba(123, 63, 216, 0.5);
+  background: #3A1060;
+  color: #fff;
+  font-family: var(--font);
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 1.5px;
+  cursor: pointer;
+  transition: all .2s;
+  margin-top: -6px;
+}
+.btn-team-up:hover {
+  background: #4A1A80;
+  border-color: rgba(123, 63, 216, 0.8);
+}
+.btn-team-up.hidden { display: none; }
+
 /* START button */
 .btn-start {
   width: 100%;

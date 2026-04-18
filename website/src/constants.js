@@ -36,6 +36,10 @@ export const PLAYER_LIGHT  = [COLORS.LIGHT_YELLOW, COLORS.LIGHT_BLUE, COLORS.LIG
 export const PLAYER_DARK   = [COLORS.DARK_YELLOW,  COLORS.DARK_BLUE,  COLORS.DARK_RED,  COLORS.DARK_GREEN];
 export const PLAYER_NAMES  = ["Sachin Kumar", "Thiago Rodrigues", "Govind", "Shivali Mahajan"];
 
+// POV Rotation: Angles to make each player appear at Bottom-Left
+// P0(TL)->270deg, P1(TR)->180deg, P2(BR)->90deg, P3(BL)->0deg
+export const PLAYER_ROTATIONS = [Math.PI * 1.5, Math.PI, Math.PI * 0.5, 0];
+
 // Token home base positions (col, row) inside each home area
 export const HOME_POSITIONS = {
     0: [[1.75,1.75],[4.25,1.75],[1.75,4.25],[4.25,4.25]],         // Green TL

@@ -59,11 +59,11 @@ io.on('connection', (socket) => {
     });
 
     // Creates a new room
-    socket.on('create-room', ({ name, count }, callback) => {
+    socket.on('create-room', ({ name, count, teamUpMode }, callback) => {
         const roomId = Math.random().toString(36).substring(2, 8).toUpperCase();
         const sessionId = randomUUID();
         
-        const room = new LudoRoom(roomId, { playerCount: count || 4 }, (event, data) => {
+        const room = new LudoRoom(roomId, { playerCount: count || 4, teamUpMode: !!teamUpMode }, (event, data) => {
             io.to(roomId).emit(event, data);
         });
         rooms.set(roomId, room);

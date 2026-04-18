@@ -1,5 +1,13 @@
 [build]
-builder = "NIXPACKS"
+builder = "DOCKER"
 
 [build.env]
-NODE_VERSION = "20"
+NIXPACKS_NODE_VERSION = "22.14.0"
+NODE_VERSION = "22.14.0"
+
+[phases.install]
+cmds = [
+    "rm -rf package-lock.json website/package-lock.json server/package-lock.json",
+    "rm -rf node_modules website/node_modules server/node_modules",
+    "npm install"
+]

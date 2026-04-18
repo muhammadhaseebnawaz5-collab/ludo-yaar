@@ -1,4 +1,4 @@
-import { SCREEN_W, SCREEN_H, PLAYER_NAMES, PLAYER_COLORS, BOARD_X, BOARD_SIZE, BOARD_Y } from './constants.js';
+import { SCREEN_W, SCREEN_H, PLAYER_NAMES, PLAYER_COLORS, BOARD_X, BOARD_SIZE, BOARD_Y, PLAYER_ROTATIONS } from './constants.js';
 import { LudoGame } from './game.js';
 import { NetworkManager } from './network.js';
 
@@ -52,6 +52,7 @@ const ibSenderName     = document.getElementById('ibSenderName');
 let selectedCount = 2;
 let isHost        = false;
 let pendingInvite = null; // { roomId, senderName }
+let teamUpMode    = false;
 
 // ═══════════════════════════════════════════
 //  PLAYER COUNT SELECTION
@@ -61,8 +62,30 @@ playerCountRow.querySelectorAll('.count-btn').forEach(btn => {
         playerCountRow.querySelectorAll('.count-btn').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
         selectedCount = parseInt(btn.dataset.count);
+        
+        // Update Team Up visibility based on player count (only for 4 players)
+        const teamUpBtn = document.getElementById('btnTeamUp');
+        if (selectedCount === 4) {
+            teamUpBtn.classList.remove('hidden');
+        } else {
+            teamUpBtn.classList.add('hidden');
+            teamUpMode = false;
+            updateTeamUpBtnUI();
+        }
     });
 });
+
+// Team Up Toggle
+const btnTeamUp = document.getElementById('btnTeamUp');
+btnTeamUp.addEventListener('click', () => {
+    teamUpMode = !teamUpMode;
+    updateTeamUpBtnUI();
+});
+
+function updateTeamUpBtnUI() {
+    btnTeamUp.textContent = teamUpMode ? '✅ TEAM UP ON' : '👥 TEAM UP';
+    btnTeamUp.style.background = teamUpMode ? '#28A33E' : '#3A1060';
+}
 
 // ═══════════════════════════════════════════
 //  SCREEN HELPERS
@@ -87,7 +110,7 @@ btnStart.addEventListener('click', () => {
     btnStart.disabled = true;
     btnStart.textContent = '⏳ Creating…';
 
-    network.createRoom(name, selectedCount, (res) => {
+    network.createRoom(name, selectedCount, teamUpMode, (res) => {
         btnStart.disabled = false;
         btnStart.textContent = '▶ START';
         if (res.success) {
@@ -478,7 +501,19 @@ function handleInput(e) {
     e.preventDefault();
     const [sx, sy] = getPos(e);
 
-    const moveOption = game.moveSelection.handleClick(sx, sy);
+    // --- COORDINATE UN-ROTATION FOR BOARD CLICKS ---
+    const bcx = BOARD_X + BOARD_SIZE / 2;
+    const bcy = BOARD_Y + BOARD_SIZE / 2;
+    const angle = PLAYER_ROTATIONS[game.clientPlayer] || 0;
+    
+    // Rotate point (sx, sy) by -angle around (bcx, bcy)
+    const dx = sx - bcx;
+    const dy = sy - bcy;
+    const lx = bcx + dx * Math.cos(-angle) - dy * Math.sin(-angle);
+    const ly = bcy + dx * Math.sin(-angle) + dy * Math.cos(-angle);
+    // ----------------------------------------------
+
+    const moveOption = game.moveSelection.handleClick(lx, ly);
     if (moveOption !== null) {
         const token = game.moveSelection.activeToken;
         game.moveSelection.hide();
@@ -486,7 +521,7 @@ function handleInput(e) {
         return;
     }
 
-    const junctionChoice = game.junctionArrows.handleClick(sx, sy);
+    const junctionChoice = game.junctionArrows.handleClick(lx, ly);
     if (junctionChoice !== null) {
         const token = game.junctionArrows.activeToken;
         game.junctionArrows.hide();
@@ -534,7 +569,8 @@ function handleInput(e) {
         return;
     }
 
-    game.handleTokenClick(sx, sy);
+    // Use logical coordinates (lx, ly) for board-related clicks
+    game.handleTokenClick(lx, ly);
 
     if (game.emojiPanel.visible) {
         const eyBase = 480, exBase = 20;

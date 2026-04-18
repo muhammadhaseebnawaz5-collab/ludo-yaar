@@ -296,6 +296,7 @@ export class LudoRoom {
         let killedTokens = [];
         for (let p = 0; p < 4; p++) {
             if (p === movedToken.player) continue;
+            
             for (let i = 0; i < 4; i++) {
                 let t = this.state.tokens[p][i];
                 let tLapEnd = 51 + 52 * (t.lapCount || 0);

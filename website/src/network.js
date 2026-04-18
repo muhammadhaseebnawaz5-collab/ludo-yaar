@@ -114,8 +114,8 @@ export class NetworkManager {
     }
 
     // ── Create Room ──
-    createRoom(name, count, callback) {
-        this.socket.emit('create-room', { name, count }, (res) => {
+    createRoom(name, count, teamUpMode, callback) {
+        this.socket.emit('create-room', { name, count, teamUpMode }, (res) => {
             if (res.success) {
                 this.roomId      = res.roomId;
                 this.sessionId   = res.sessionId;
