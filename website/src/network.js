@@ -11,6 +11,7 @@ export class NetworkManager {
         this.playerColor = null;
 
         this.peers       = {};
+        this.socketIds   = {}; // sessionId -> socketId
         this.localStream = null;
         this.isMicOn     = false;
 
@@ -35,6 +36,10 @@ export class NetworkManager {
         });
 
         this.socket.on('room-update', (data) => {
+            // Update socketId mapping for WebRTC
+            data.players.forEach(p => {
+                if (p.socketId) this.socketIds[p.color] = p.socketId;
+            });
             this.game.updateLobbyPlayers(data.players);
         });
 
@@ -191,6 +196,12 @@ export class NetworkManager {
                 this.localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
                 this.isMicOn = true;
                 this.broadcastVoiceStatus();
+                // When turning on mic, initiate connection to all other players
+                Object.values(this.socketIds).forEach(sid => {
+                    if (sid !== this.socket.id && !this.peers[sid]) {
+                        this.createPeerConnection(sid, true);
+                    }
+                });
             } catch(e) {
                 console.error('Mic error', e);
                 return false;

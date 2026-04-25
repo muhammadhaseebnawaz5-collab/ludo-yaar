@@ -73,7 +73,15 @@ io.on('connection', (socket) => {
         socket.join(roomId);
         
         callback({ success: true, roomId, sessionId, playerColor: player.colorIndex });
-        io.to(roomId).emit('room-update', { players: room.players.map(p => ({name: p.name, color: p.colorIndex, online: p.isOnline, botEnabled: p.botEnabled})) });
+        io.to(roomId).emit('room-update', { 
+            players: room.players.map(p => ({
+                name: p.name, 
+                color: p.colorIndex, 
+                online: p.isOnline, 
+                botEnabled: p.botEnabled,
+                socketId: p.socketId
+            })) 
+        });
     });
 
     // Joins an existing room
@@ -92,7 +100,15 @@ io.on('connection', (socket) => {
         socket.sessionId = sessionId;
 
         callback({ success: true, sessionId, playerColor: player.colorIndex, state: room.state });
-        io.to(roomId).emit('room-update', { players: room.players.map(p => ({name: p.name, color: p.colorIndex, online: p.isOnline, botEnabled: p.botEnabled})) });
+        io.to(roomId).emit('room-update', { 
+            players: room.players.map(p => ({
+                name: p.name, 
+                color: p.colorIndex, 
+                online: p.isOnline, 
+                botEnabled: p.botEnabled,
+                socketId: p.socketId
+            })) 
+        });
     });
 
     // Start Game
@@ -156,7 +172,15 @@ io.on('connection', (socket) => {
             const player = room.players.find(p => p.socketId === socket.id);
             if (player) {
                 room.disconnectPlayer(socket.id);
-                io.to(roomId).emit('room-update', { players: room.players.map(p => ({name: p.name, color: p.colorIndex, online: p.isOnline, botEnabled: p.botEnabled})) });
+                io.to(roomId).emit('room-update', { 
+                    players: room.players.map(p => ({
+                        name: p.name, 
+                        color: p.colorIndex, 
+                        online: p.isOnline, 
+                        botEnabled: p.botEnabled,
+                        socketId: p.socketId
+                    })) 
+                });
                 
                 // Optional: Cleanup empty rooms after a few minutes
             }

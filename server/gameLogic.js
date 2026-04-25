@@ -97,7 +97,8 @@ export class LudoRoom {
                 name: p.name, 
                 color: p.colorIndex, 
                 online: p.isOnline, 
-                botEnabled: p.botEnabled
+                botEnabled: p.botEnabled,
+                socketId: p.socketId
             })) 
         });
     }
