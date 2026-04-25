@@ -253,6 +253,32 @@ canvas {
 .btn-start:hover  { transform: translateY(-2px); box-shadow: 0 10px 28px rgba(39,164,78,0.65); }
 .btn-start:active { transform: translateY(0);    box-shadow: 0 4px 12px rgba(39,164,78,0.4); }
 
+/* VS COMPUTER button */
+.btn-vs-computer {
+  width: 100%;
+  padding: 15px;
+  border-radius: var(--radius-md);
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  background: linear-gradient(135deg, #4A1A80 0%, #2D0F5E 100%);
+  color: #fff;
+  font-family: var(--font);
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: 1.5px;
+  cursor: pointer;
+  box-shadow: 0 4px 15px rgba(0,0,0,0.4);
+  transition: all .15s;
+  margin-top: 8px;
+}
+.btn-vs-computer:hover {
+  background: linear-gradient(135deg, #5A2A90 0%, #3D1F6E 100%);
+  transform: translateY(-2px);
+  border-color: rgba(255, 255, 255, 0.4);
+}
+.btn-vs-computer:active {
+  transform: translateY(0);
+}
+
 /* Divider */
 .lobby-divider {
   display: flex;

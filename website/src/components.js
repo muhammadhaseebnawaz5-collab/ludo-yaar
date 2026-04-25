@@ -11,10 +11,10 @@ export class DiceAnimation {
         this.angle = 0;
     }
 
-    roll() {
+    roll(val = null) {
         this.rolling = true;
         this.rollFrames = 0;
-        this.value = Math.floor(Math.random() * 6) + 1;
+        this.value = val || Math.floor(Math.random() * 6) + 1;
     }
 
     update() {
@@ -30,49 +30,7 @@ export class DiceAnimation {
         }
     }
 
-    draw(ctx, x, y, size = 55) {
-        const val = this.rolling ? this.displayValue : this.value;
-        
-        // Shadow
-        ctx.fillStyle = 'rgba(40, 20, 40, 1)';
-        ctx.beginPath();
-        ctx.roundRect(x + 4, y + 4, size, size, 12);
-        ctx.fill();
-
-        // Dice body
-        ctx.fillStyle = COLORS.WHITE;
-        ctx.beginPath();
-        ctx.roundRect(x, y, size, size, 12);
-        ctx.fill();
-        
-        ctx.strokeStyle = COLORS.DARK_GRAY;
-        ctx.lineWidth = 3;
-        ctx.stroke();
-
-        // Dots
-        const dotPositions = {
-            1: [[0.5, 0.5]],
-            2: [[0.25, 0.25], [0.75, 0.75]],
-            3: [[0.25, 0.25], [0.5, 0.5], [0.75, 0.75]],
-            4: [[0.25, 0.25], [0.75, 0.25], [0.25, 0.75], [0.75, 0.75]],
-            5: [[0.25, 0.25], [0.75, 0.25], [0.5, 0.5], [0.25, 0.75], [0.75, 0.75]],
-            6: [[0.25, 0.2], [0.75, 0.2], [0.25, 0.5], [0.75, 0.5], [0.25, 0.8], [0.75, 0.8]]
-        };
-
-        ctx.fillStyle = COLORS.BLACK;
-        const dots = dotPositions[val] || [];
-        dots.forEach(([dx, dy]) => {
-            const dotX = x + dx * size;
-            const dotY = y + dy * size;
-            ctx.beginPath();
-            ctx.arc(dotX, dotY, size / 9, 0, Math.PI * 2);
-            ctx.fill();
-            
-            ctx.strokeStyle = COLORS.DARK_GRAY;
-            ctx.lineWidth = 1;
-            ctx.stroke();
-        });
-    }
+    // draw() was removed because LudoGame uses its own draw3DDice method for rendering.
 }
 
 export class Token {
@@ -96,6 +54,9 @@ export class Token {
         this.hopProgress = 0;
         this.startPx = 0;
         this.startPy = 0;
+        
+        this.isCurrentPlayer = false;
+        this.isMoveable = false;
     }
 
     update() {
@@ -145,6 +106,71 @@ export class Token {
 
         ctx.save();
         ctx.translate(x, y);
+
+        // ══════════════════════════════════════════
+        // TOKEN GLOW SYSTEM (Canvas-based)
+        // ══════════════════════════════════════════
+        if (this.isCurrentPlayer && !this.finished) {
+            if (this.isMoveable) {
+                // GOLDEN INTENSE GLOW — chal sakta hai
+                const pulseScale = 1 + Math.sin(this.pulse * 2) * 0.12; // fast bounce
+                const glowR = r * 1.6 * pulseScale;
+                
+                // Outer golden halo (multiple layers for intensity)
+                [0.18, 0.28, 0.42].forEach((alpha, i) => {
+                    const layerR = glowR * (1 + i * 0.3);
+                    ctx.beginPath();
+                    ctx.arc(0, 0, layerR, 0, Math.PI * 2);
+                    ctx.fillStyle = `rgba(253, 224, 71, ${alpha})`;
+                    ctx.fill();
+                });
+
+                // Bounce — token thoda upar jaata hai
+                const bounce = Math.sin(this.pulse * 2) * 5;
+                ctx.translate(0, -bounce);
+
+            } else if (this.inHome) {
+                // HOME TOKEN — blue idle glow (hamesha)
+                const pulseAlpha = 0.25 + Math.sin(this.pulse) * 0.12;
+                [1.5, 2.0, 2.6].forEach((mult, i) => {
+                    ctx.beginPath();
+                    ctx.arc(0, 0, r * mult, 0, Math.PI * 2);
+                    ctx.fillStyle = `rgba(96, 165, 250, ${pulseAlpha / (i + 1)})`;
+                    ctx.fill();
+                });
+                
+                // Slow float (token thoda hilta hai)
+                const floatY = Math.sin(this.pulse * 0.6) * 3;
+                ctx.translate(0, -floatY);
+
+            } else {
+                // BOARD TOKEN — blue idle glow (hamesha current player ke)
+                const pulseAlpha = 0.2 + Math.sin(this.pulse) * 0.1;
+                [1.4, 1.9, 2.5].forEach((mult, i) => {
+                    ctx.beginPath();
+                    ctx.arc(0, 0, r * mult, 0, Math.PI * 2);
+                    ctx.fillStyle = `rgba(96, 165, 250, ${pulseAlpha / (i + 1)})`;
+                    ctx.fill();
+                });
+            }
+            
+            // Ring pulse effect (expanding ring)
+            const ringProgress = (this.pulse % (Math.PI * 2)) / (Math.PI * 2);
+            const ringR = r * 1.2 + ringProgress * r * 2.5;
+            const ringAlpha = Math.max(0, 0.6 - ringProgress * 0.6);
+            ctx.strokeStyle = this.isMoveable 
+                ? `rgba(251, 191, 36, ${ringAlpha})` 
+                : `rgba(96, 165, 250, ${ringAlpha})`;
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(0, 0, ringR, 0, Math.PI * 2);
+            ctx.stroke();
+
+        } else if (!this.isCurrentPlayer) {
+            // DOOSRE PLAYER — dim kar do
+            ctx.globalAlpha = 0.3;
+        }
+        // ══════════════════════════════════════════
 
         // 1. Drop Shadow for overall piece
         ctx.shadowColor = 'rgba(0, 0, 0, 0.4)';
@@ -281,6 +307,7 @@ export class ProfileAvatar {
         this.speakTimer = 0;
         this.micOn = false; // Is their mic enabled?
         this.timerPercent = 0; // 0 to 1 for the green turn timer ring
+        this.botEnabled = false;
     }
 
     update() {
@@ -344,14 +371,6 @@ export class ProfileAvatar {
         ctx.font = "bold 12px Arial";
         ctx.fillText(this.name.substring(0, 14), x, y + r + 15);
 
-        // Turn Timer Ring (Green)
-        if (this.active && this.timerPercent > 0) {
-            ctx.strokeStyle = COLORS.GREEN;
-            ctx.lineWidth = 4;
-            ctx.beginPath();
-            ctx.arc(x, y, r + 8, -Math.PI / 2, -Math.PI / 2 + (Math.PI * 2 * this.timerPercent));
-            ctx.stroke();
-        }
 
         // Speaker / Mic Status Icon (bottom right of avatar)
         const spkX = x + r - 4;
@@ -378,102 +397,13 @@ export class ProfileAvatar {
                 ctx.beginPath(); ctx.arc(spkX + 1, spkY, 6, -Math.PI/4, Math.PI/4); ctx.stroke();
             }
         }
+
+
     }
 }
 
-export class AudioControl {
-    constructor(x, y, mode = 'speaker') {
-        this.x = x;
-        this.y = y;
-        this.active = false;
-        this.pulse = 0;
-        this.size = 30;
-        this.mode = mode; // 'mic' or 'speaker'
-    }
+// AudioControl class was removed as it was unused in the current implementation.
 
-    update() {
-        this.pulse += 0.1;
-    }
-
-    draw(ctx) {
-        const color = (this.active && this.mode === 'mic') ? COLORS.RED : COLORS.DARK_GRAY;
-        ctx.fillStyle = color;
-        ctx.beginPath();
-        ctx.arc(this.x, this.y, this.size / 2, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.strokeStyle = COLORS.WHITE;
-        ctx.lineWidth = 2;
-        ctx.stroke();
-
-        if (this.mode === 'mic') {
-            // Mic icon
-            ctx.fillStyle = COLORS.WHITE;
-            ctx.beginPath();
-            ctx.roundRect(this.x - 4, this.y - 7, 8, 14, 4);
-            ctx.fill();
-
-            ctx.strokeStyle = COLORS.WHITE;
-            ctx.lineWidth = 2;
-            ctx.beginPath();
-            ctx.arc(this.x, this.y - 2, 8, Math.PI, Math.PI * 2, true);
-            ctx.stroke();
-
-            ctx.beginPath();
-            ctx.moveTo(this.x, this.y + 4);
-            ctx.lineTo(this.x, this.y + 8);
-            ctx.stroke();
-
-            ctx.beginPath();
-            ctx.moveTo(this.x - 5, this.y + 8);
-            ctx.lineTo(this.x + 5, this.y + 8);
-            ctx.stroke();
-        } else {
-            // Speaker icon
-            ctx.fillStyle = COLORS.WHITE;
-            ctx.beginPath();
-            ctx.moveTo(this.x - 6, this.y - 3);
-            ctx.lineTo(this.x - 2, this.y - 3);
-            ctx.lineTo(this.x + 3, this.y - 7);
-            ctx.lineTo(this.x + 3, this.y + 7);
-            ctx.lineTo(this.x - 2, this.y + 3);
-            ctx.lineTo(this.x - 6, this.y + 3);
-            ctx.closePath();
-            ctx.fill();
-
-            // Sound waves
-            ctx.strokeStyle = COLORS.WHITE;
-            ctx.lineWidth = 1.5;
-            ctx.beginPath();
-            ctx.arc(this.x + 1, this.y, 6, -Math.PI / 4, Math.PI / 4);
-            ctx.stroke();
-            ctx.beginPath();
-            ctx.arc(this.x + 1, this.y, 10, -Math.PI / 4, Math.PI / 4);
-            ctx.stroke();
-        }
-
-        if (this.active) {
-            for (let i = 0; i < 3; i++) {
-                const r = this.size / 2 + 5 + i * 7;
-                const alpha = (0.5 - i * 0.15 + Math.sin(this.pulse + i) * 0.1);
-                ctx.strokeStyle = this.mode === 'mic' ? `rgba(255, 100, 100, ${alpha})` : `rgba(100, 204, 255, ${alpha})`;
-                ctx.lineWidth = 2;
-                ctx.beginPath();
-                ctx.arc(this.x, this.y, r, 0, Math.PI * 2);
-                ctx.stroke();
-            }
-        }
-    }
-
-    handleClick(x, y) {
-        const dx = x - this.x;
-        const dy = y - this.y;
-        if (Math.sqrt(dx * dx + dy * dy) <= this.size / 2) {
-            this.active = !this.active;
-            return true;
-        }
-        return false;
-    }
-}
 
 export class MoveSelectionOverlay {
     constructor() {
@@ -491,11 +421,11 @@ export class MoveSelectionOverlay {
         this.activeToken = null;
     }
 
-    draw(ctx) {
+    draw(ctx, sx, sy) {
         if (!this.activeToken) return;
 
-        const x = this.activeToken.px;
-        const y = this.activeToken.py - 60;
+        const x = sx;
+        const y = sy - 60;
         const w = this.options.length * 50;
 
         ctx.fillStyle = 'rgba(40, 20, 60, 0.95)';
@@ -523,10 +453,10 @@ export class MoveSelectionOverlay {
         });
     }
 
-    handleClick(sx, sy) {
+    handleClick(mx, my, sx, sy) {
         if (!this.activeToken) return null;
-        const x = this.activeToken.px;
-        const y = this.activeToken.py - 60;
+        const x = sx;
+        const y = sy - 60;
         const w = this.options.length * 50;
 
         for (let i = 0; i < this.options.length; i++) {
@@ -545,46 +475,176 @@ export class JunctionArrows {
         this.activeToken = null;
         this.homePos = null;
         this.lapPos = null;
+        this.stepsRemaining = 0;
+        this.pulse = 0;
+        this.visible = false;
     }
 
-    show(token, homePos, lapPos) {
+    show(token, homePos, lapPos, stepsRemaining) {
         this.activeToken = token;
         this.homePos = homePos;
         this.lapPos = lapPos;
+        this.stepsRemaining = stepsRemaining;
+        this.visible = true;
+        this.pulse = 0;
     }
 
     hide() {
         this.activeToken = null;
+        this.visible = false;
+    }
+
+    update() {
+        if (this.visible) this.pulse += 0.08;
     }
 
     draw(ctx) {
-        if (!this.activeToken) return;
+        if (!this.visible || !this.activeToken) return;
 
-        // Draw Home Arrow
-        this.drawArrow(ctx, this.homePos, 'HOME', COLORS.GOLD);
-        // Draw Lap Arrow
-        this.drawArrow(ctx, this.lapPos, 'LAP', COLORS.WHITE);
+        // Draw connecting lines from token to each option
+        this.drawConnectingLine(ctx, this.activeToken.px, this.activeToken.py, this.homePos, '#FFD700');
+        this.drawConnectingLine(ctx, this.activeToken.px, this.activeToken.py, this.lapPos, '#00E5FF');
+
+        // Draw HOME button
+        this.drawChoiceBox(ctx, this.homePos, 'home');
+
+        // Draw LAP button  
+        this.drawChoiceBox(ctx, this.lapPos, 'lap');
+
+        // Draw question bubble above token
+        this.drawQuestionBubble(ctx);
     }
 
-    drawArrow(ctx, pos, text, color) {
-        const [x, y] = pos;
-        ctx.fillStyle = color;
+    drawConnectingLine(ctx, x1, y1, pos, color) {
+        const [x2, y2] = pos;
+        ctx.save();
+        ctx.setLineDash([6, 4]);
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2;
+        ctx.globalAlpha = 0.6 + Math.sin(this.pulse) * 0.3;
         ctx.beginPath();
-        ctx.arc(x, y, 20, 0, Math.PI * 2);
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.restore();
+    }
+
+    drawChoiceBox(ctx, pos, type) {
+        const [x, y] = pos;
+        const isHome = type === 'home';
+        const w = 90, h = 52;
+        const bx = x - w / 2;
+        const by = y - h / 2;
+
+        const pulse = Math.sin(this.pulse * (isHome ? 1.2 : 1.5)) * 0.15;
+        const scale = 1 + pulse;
+
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.scale(scale, scale);
+        ctx.translate(-x, -y);
+
+        // Shadow
+        ctx.shadowColor = isHome ? 'rgba(255, 215, 0, 0.6)' : 'rgba(0, 229, 255, 0.6)';
+        ctx.shadowBlur = 16 + Math.sin(this.pulse) * 6;
+
+        // Box background
+        const grad = ctx.createLinearGradient(bx, by, bx, by + h);
+        if (isHome) {
+            grad.addColorStop(0, '#7B3F00');
+            grad.addColorStop(0.5, '#4A2200');
+            grad.addColorStop(1, '#2D1500');
+        } else {
+            grad.addColorStop(0, '#003366');
+            grad.addColorStop(0.5, '#001A3A');
+            grad.addColorStop(1, '#000D1F');
+        }
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.roundRect(bx, by, w, h, 12);
         ctx.fill();
-        ctx.strokeStyle = COLORS.BLACK;
+
+        // Border
+        ctx.strokeStyle = isHome ? '#FFD700' : '#00E5FF';
+        ctx.lineWidth = 2.5;
         ctx.stroke();
 
-        ctx.fillStyle = color === COLORS.GOLD ? COLORS.BLACK : COLORS.PURPLE;
-        ctx.font = "bold 10px Arial";
-        ctx.textAlign = "center";
-        ctx.fillText(text, x, y + 4);
+        ctx.shadowBlur = 0;
+
+        // Icon
+        ctx.font = '20px Arial';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(isHome ? '🏠' : '🔄', x, y - 8);
+
+        // Label
+        ctx.fillStyle = isHome ? '#FFD700' : '#00E5FF';
+        ctx.font = 'bold 11px Arial';
+        ctx.fillText(isHome ? 'HOME' : 'LAP', x, y + 10);
+
+        // Steps hint
+        ctx.fillStyle = 'rgba(255,255,255,0.55)';
+        ctx.font = '9px Arial';
+        ctx.fillText(`+${this.stepsRemaining} steps`, x, y + 22);
+
+        ctx.restore();
+    }
+
+    drawQuestionBubble(ctx) {
+        if (!this.activeToken) return;
+        const tx = this.activeToken.px;
+        const ty = this.activeToken.py - 55;
+        const w = 140, h = 34;
+
+        const bounce = Math.sin(this.pulse * 1.5) * 3;
+
+        ctx.save();
+        ctx.translate(0, bounce);
+
+        // Bubble background
+        ctx.fillStyle = 'rgba(20, 10, 40, 0.92)';
+        ctx.beginPath();
+        ctx.roundRect(tx - w / 2, ty - h / 2, w, h, 10);
+        ctx.fill();
+
+        ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+
+        // Tail
+        ctx.fillStyle = 'rgba(20, 10, 40, 0.92)';
+        ctx.beginPath();
+        ctx.moveTo(tx - 8, ty + h / 2);
+        ctx.lineTo(tx, ty + h / 2 + 10);
+        ctx.lineTo(tx + 8, ty + h / 2);
+        ctx.closePath();
+        ctx.fill();
+
+        // Text
+        ctx.fillStyle = '#FFFFFF';
+        ctx.font = 'bold 11px Arial';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('Kahan jaana hai?', tx, ty);
+
+        ctx.restore();
     }
 
     handleClick(sx, sy) {
-        if (!this.activeToken) return null;
-        if (Math.hypot(sx - this.homePos[0], sy - this.homePos[1]) < 20) return 'home';
-        if (Math.hypot(sx - this.lapPos[0], sy - this.lapPos[1]) < 20) return 'lap';
+        if (!this.visible || !this.activeToken) return null;
+        const w = 90, h = 52;
+
+        const [hx, hy] = this.homePos;
+        if (sx >= hx - w/2 && sx <= hx + w/2 && sy >= hy - h/2 && sy <= hy + h/2) {
+            return 'home';
+        }
+
+        const [lx, ly] = this.lapPos;
+        if (sx >= lx - w/2 && sx <= lx + w/2 && sy >= ly - h/2 && sy <= ly + h/2) {
+            return 'lap';
+        }
+
         return null;
     }
 }

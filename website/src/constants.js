@@ -38,7 +38,12 @@ export const PLAYER_NAMES  = ["Sachin Kumar", "Thiago Rodrigues", "Govind", "Shi
 
 // POV Rotation: Angles to make each player appear at Bottom-Left
 // P0(TL)->270deg, P1(TR)->180deg, P2(BR)->90deg, P3(BL)->0deg
-export const PLAYER_ROTATIONS = [Math.PI * 1.5, Math.PI, Math.PI * 0.5, 0];
+export const PLAYER_ROTATIONS = [
+    (3 * Math.PI) / 2, // Player 0 (TL) -> rotate 270° CW to reach BL
+    Math.PI,           // Player 1 (TR) -> rotate 180° CW to reach BL
+    Math.PI / 2,       // Player 2 (BR) -> rotate 90° CW to reach BL
+    0                  // Player 3 (BL) -> no rotation
+];
 
 // Token home base positions (col, row) inside each home area
 export const HOME_POSITIONS = {
@@ -91,3 +96,30 @@ export const TEAM_MAP = {
     0: 0, 1: 0, // Team A: Yellow + Blue (or as desired)
     2: 1, 3: 1  // Team B: Red + Green
 };
+
+// ─── BOARD HELPERS ──────────────────────────────────────────────────
+export function getCellType(col, row) {
+    if (col <= 5 && row <= 5) return { type: 'home', player: 0 };
+    if (col >= 9 && row <= 5) return { type: 'home', player: 1 };
+    if (col >= 9 && row >= 9) return { type: 'home', player: 2 };
+    if (col <= 5 && row >= 9) return { type: 'home', player: 3 };
+    if (col >= 6 && col <= 8 && row >= 6 && row <= 8) return { type: 'center' };
+    if (row === 7 && col >= 1 && col <= 6) return { type: 'stretch', player: 0 };
+    if (col === 7 && row >= 1 && row <= 6) return { type: 'stretch', player: 1 };
+    if (row === 7 && col >= 8 && col <= 13) return { type: 'stretch', player: 2 };
+    if (col === 7 && row >= 8 && row <= 13) return { type: 'stretch', player: 3 };
+    return { type: 'track' };
+}
+
+export function isStartCell(col, row) {
+    return (col === 1 && row === 6) || (col === 8 && row === 1) || (col === 13 && row === 8) || (col === 6 && row === 13);
+}
+
+export function getStartPlayer(col, row) {
+    if (col === 1 && row === 6) return 0;
+    if (col === 8 && row === 1) return 1;
+    if (col === 13 && row === 8) return 2;
+    if (col === 6 && row === 13) return 3;
+    return -1;
+}
+

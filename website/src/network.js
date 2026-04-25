@@ -39,8 +39,11 @@ export class NetworkManager {
         });
 
         this.socket.on('game-started', (state) => {
-            if (this.game.gameState === 'lobby') {
+            window.debugLog('Game started event received from server');
+            if (this.game.gameState === 'lobby' || this.game.gameState === 'setup') {
                 this.game.startGameFromServer(state);
+            } else {
+                window.debugLog(`Ignored game-started: current state is ${this.game.gameState}`, 'warn');
             }
         });
 
@@ -57,7 +60,7 @@ export class NetworkManager {
         });
 
         this.socket.on('token-moved', (data) => {
-            this.game.playRemoteTokenMove(data.player, data.index, data.toSteps, data.finishedInHome);
+            this.game.playRemoteTokenMove(data.player, data.index, data.toSteps, data.finishedInHome, data.lapCount);
         });
 
         this.socket.on('tokens-killed', ({ movedToken, killed }) => {
@@ -175,6 +178,10 @@ export class NetworkManager {
 
     sendChat(text, senderName, color) {
         this.socket.emit('chat-message', { roomId: this.roomId, message: { sender: senderName, text }, color });
+    }
+
+    toggleBot(enabled) {
+        this.socket.emit('toggle-bot', { roomId: this.roomId, sessionId: this.sessionId, enabled });
     }
 
     // ── Voice ──

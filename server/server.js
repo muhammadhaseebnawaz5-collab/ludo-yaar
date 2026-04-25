@@ -73,7 +73,7 @@ io.on('connection', (socket) => {
         socket.join(roomId);
         
         callback({ success: true, roomId, sessionId, playerColor: player.colorIndex });
-        io.to(roomId).emit('room-update', { players: room.players.map(p => ({name: p.name, color: p.colorIndex, online: p.isOnline})) });
+        io.to(roomId).emit('room-update', { players: room.players.map(p => ({name: p.name, color: p.colorIndex, online: p.isOnline, botEnabled: p.botEnabled})) });
     });
 
     // Joins an existing room
@@ -92,7 +92,7 @@ io.on('connection', (socket) => {
         socket.sessionId = sessionId;
 
         callback({ success: true, sessionId, playerColor: player.colorIndex, state: room.state });
-        io.to(roomId).emit('room-update', { players: room.players.map(p => ({name: p.name, color: p.colorIndex, online: p.isOnline})) });
+        io.to(roomId).emit('room-update', { players: room.players.map(p => ({name: p.name, color: p.colorIndex, online: p.isOnline, botEnabled: p.botEnabled})) });
     });
 
     // Start Game
@@ -139,6 +139,11 @@ io.on('connection', (socket) => {
         io.to(roomId).emit('chat-message', { message, color });
     });
 
+    socket.on('toggle-bot', ({ roomId, sessionId, enabled }) => {
+        const room = rooms.get(roomId);
+        if (room) room.handleToggleBot(sessionId, enabled);
+    });
+
     socket.on('disconnect', () => {
         console.log('Client disconnected:', socket.id);
 
@@ -151,7 +156,7 @@ io.on('connection', (socket) => {
             const player = room.players.find(p => p.socketId === socket.id);
             if (player) {
                 room.disconnectPlayer(socket.id);
-                io.to(roomId).emit('room-update', { players: room.players.map(p => ({name: p.name, color: p.colorIndex, online: p.isOnline})) });
+                io.to(roomId).emit('room-update', { players: room.players.map(p => ({name: p.name, color: p.colorIndex, online: p.isOnline, botEnabled: p.botEnabled})) });
                 
                 // Optional: Cleanup empty rooms after a few minutes
             }

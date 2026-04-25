@@ -107,15 +107,44 @@ function hidePopup(el)  { el.classList.add('hidden'); }
 // ═══════════════════════════════════════════
 btnStart.addEventListener('click', () => {
     const name = playerNameInput.value.trim() || 'Host';
+    localStorage.setItem('ludoLastName', name); // Persist for refresh
     btnStart.disabled = true;
     btnStart.textContent = '⏳ Creating…';
 
     network.createRoom(name, selectedCount, teamUpMode, (res) => {
         btnStart.disabled = false;
-        btnStart.textContent = '▶ START';
+        btnStart.textContent = '▶ PLAY WITH FRIENDS';
         if (res.success) {
+            window.debugLog(`Room created: ${res.roomId}`);
             isHost = true;
             enterWaitingRoom(res.roomId, name, true);
+        } else {
+            window.debugLog(`Room creation failed: ${res.error}`, 'error');
+        }
+    });
+});
+
+// ═══════════════════════════════════════════
+//  LOBBY — VS COMPUTER
+// ═══════════════════════════════════════════
+const btnVsComputer = document.getElementById('btnVsComputer');
+btnVsComputer.addEventListener('click', () => {
+    const name = playerNameInput.value.trim() || 'Player';
+    localStorage.setItem('ludoLastName', name);
+    btnVsComputer.disabled = true;
+    btnVsComputer.textContent = '⏳ Loading…';
+
+    // Create a 2-player room and start it immediately
+    network.createRoom(name, 2, false, (res) => {
+        btnVsComputer.disabled = false;
+        btnVsComputer.textContent = '🤖 VS COMPUTER';
+        if (res.success) {
+            window.debugLog(`VS COMPUTER room created: ${res.roomId}`);
+            isHost = true;
+            network.startGame();
+            window.debugLog('StartGame command sent for VS COMPUTER');
+        } else {
+            window.debugLog(`VS COMPUTER room creation failed: ${res.error}`, 'error');
         }
     });
 });
@@ -138,6 +167,7 @@ function attemptJoin() {
     const code = joinCodeInput.value.trim().toUpperCase();
     if (!code) return;
     const name = playerNameInput.value.trim() || 'Player';
+    localStorage.setItem('ludoLastName', name);
     joinError.classList.add('hidden');
     btnConfirmJoin.disabled = true;
     btnConfirmJoin.textContent = 'Joining…';
@@ -151,7 +181,8 @@ function attemptJoin() {
             enterWaitingRoom(code, name, false);
             if (res.state && res.state.gameState !== 'lobby') {
                 // Reconnected to an active game → skip waiting room
-                startGame(res.state);
+                game.startGameFromServer(res.state);
+
             }
         } else {
             joinError.textContent = res.error || 'Code not found. Check and try again.';
@@ -189,30 +220,44 @@ function enterWaitingRoom(roomCode, myName, host) {
 
 /** Called by network when room-update fires */
 game.updateLobbyPlayers = function(players) {
-    const myColor = network.playerColor;
-    const totalNeeded = selectedCount;
-
-    const slots = players.map(p => ({
-        name: p.name,
-        colorIndex: p.color,
-        isYou: p.color === myColor,
-        filled: true,
-    }));
-
-    // Pad with empty slots
-    for (let i = slots.length; i < totalNeeded; i++) {
-        slots.push({ empty: true });
-    }
-
-    updateWaitSlots(slots);
-
-    // Auto-save any new friends we played with
+    // 1. ALWAYS update avatar bot state and name (critical for in-game sync)
     players.forEach(p => {
-        if (p.color !== myColor) addFriend(p.name, p.color, network.theirSessionId || null);
+        PLAYER_NAMES[p.color] = p.name;
+        if (game.avatars[p.color]) {
+            game.avatars[p.color].name = p.name;
+            game.avatars[p.color].botEnabled = !!p.botEnabled;
+        }
     });
 
-    // Auto-start when full
-    if (isHost && players.length === totalNeeded) {
+    // 2. Update Lobby UI ONLY if the element exists (prevents crash during game)
+    if (slotsContainer) {
+        const myColor = network.playerColor;
+        const totalNeeded = selectedCount;
+
+        const slots = players.map(p => ({
+            name: p.name,
+            colorIndex: p.color,
+            isYou: p.color === myColor,
+            filled: true,
+        }));
+
+        // Pad with empty slots
+        for (let i = slots.length; i < totalNeeded; i++) {
+            slots.push({ empty: true });
+        }
+
+        updateWaitSlots(slots);
+    }
+
+    // Auto-save any new friends
+    players.forEach(p => {
+        if (p.color !== network.playerColor) {
+            addFriend(p.name, p.color, network.theirSessionId || null);
+        }
+    });
+
+    // Auto-start when full (only if still in lobby)
+    if (isHost && players.length === selectedCount && game.gameState === 'lobby') {
         setTimeout(() => network.startGame(), 800);
     }
 };
@@ -416,12 +461,14 @@ btnAcceptInvite.addEventListener('click', () => {
     if (!pendingInvite) return;
     inviteBanner.classList.add('hidden');
     const name = playerNameInput.value.trim() || 'Player';
+    localStorage.setItem('ludoLastName', name);
     network.joinRoom(pendingInvite.roomId, name, (res) => {
         if (res.success) {
             isHost = false;
             enterWaitingRoom(pendingInvite.roomId, name, false);
             if (res.state && res.state.gameState !== 'lobby') {
-                startGame(res.state);
+                game.startGameFromServer(res.state);
+
             }
         } else {
             alert(res.error || 'Could not join table');
@@ -443,15 +490,17 @@ btnDeclineInvite.addEventListener('click', () => {
 /** Called when the server fires game-started */
 game.startGameFromServer = function(state) {
     hidePopup(friendsPopup);
+    lobbyScreen.classList.add('hidden');
+    lobbyScreen.classList.remove('active');
     waitingRoom.classList.add('hidden');
     waitingRoom.classList.remove('active');
+    game.clientPlayer = network.playerColor;
     game.syncState(state);
     game.gameState = state.gameState;
 };
 
-function startGame(state) {
-    game.startGameFromServer(state);
-}
+// Redundant startGame was removed. Direct calls to game.startGameFromServer are used instead.
+
 
 // Auto-join from URL param (e.g. shared link)
 (function checkUrlJoin() {
@@ -460,6 +509,12 @@ function startGame(state) {
     if (code) {
         joinCodeInput.value = code;
         showPopup(joinPopup);
+    }
+    
+    // Load last used name
+    const lastName = localStorage.getItem('ludoLastName');
+    if (lastName) {
+        playerNameInput.value = lastName;
     }
 })();
 
@@ -513,7 +568,8 @@ function handleInput(e) {
     const ly = bcy + dx * Math.sin(-angle) + dy * Math.cos(-angle);
     // ----------------------------------------------
 
-    const moveOption = game.moveSelection.handleClick(lx, ly);
+    // MoveSelection draws in UI layer (screen coords) → use sx,sy
+    const moveOption = game.moveSelection.handleClick(lx, ly, sx, sy);
     if (moveOption !== null) {
         const token = game.moveSelection.activeToken;
         game.moveSelection.hide();
@@ -521,12 +577,13 @@ function handleInput(e) {
         return;
     }
 
-    const junctionChoice = game.junctionArrows.handleClick(lx, ly);
+    // JunctionArrows draws in UI layer (screen coords) → use sx,sy
+    const junctionChoice = game.junctionArrows.handleClick(sx, sy);
     if (junctionChoice !== null) {
-        const token = game.junctionArrows.activeToken;
-        game.junctionArrows.hide();
-        token.decisionPending = false;
-        network.selectJunction(junctionChoice);
+        if (game.network && game.network.selectJunction) {
+            game.network.selectJunction(junctionChoice);
+        }
+        game.resolveJunction(junctionChoice);
         return;
     }
 
@@ -556,6 +613,31 @@ function handleInput(e) {
         if (Math.hypot(sx - crX, sy - crY) <= 24) {
             if (game.currentPlayer === network.playerColor) {
                 network.rollDice();
+            }
+            return;
+        }
+    }
+
+    // AUTO badge click check (har player ke liye)
+    for (let p = 0; p < game.playerCount; p++) {
+        const av = game.avatars[p];
+        if (!av) continue;
+        const [avX, avY] = av.position;
+        const isTop = game.getVisualIndex(p) <= 1;
+        const avR = 30;
+        const badgeY = isTop ? avY - avR - 38 : avY + avR + 22;
+        
+        if (sx >= avX - 36 && sx <= avX + 36 && sy >= badgeY && sy <= badgeY + 26) {
+            // Sirf apna badge click ho sakta hai
+            if (p === network.playerColor) {
+                const newState = !av.botEnabled;
+                network.toggleBot(newState);
+                av.botEnabled = newState; // Instant feedback
+                
+                // Agar bot off kar raha hai → khud khel raha hai
+                if (!newState) {
+                    game.gameState = 'roll'; // wapis control lo
+                }
             }
             return;
         }

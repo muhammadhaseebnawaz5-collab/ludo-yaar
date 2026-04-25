@@ -3,49 +3,12 @@ import {
     PLAYER_COLORS, PLAYER_LIGHT, PLAYER_DARK, PLAYER_NAMES, HOME_POSITIONS, 
     STAR_POSITIONS, MAIN_PATH, HOME_STRETCHES,
     PLAYER_START_INDICES, PLAYER_HOME_ENTRIES, SAFE_INDICES, TEAM_MAP,
-    PLAYER_ROTATIONS
+    PLAYER_ROTATIONS, getCellType, isStartCell, getStartPlayer
 } from './constants.js';
 import { 
-    DiceAnimation, Token, ChatSystem, ProfileAvatar, AudioControl,
+    DiceAnimation, Token, ChatSystem, ProfileAvatar,
     MoveSelectionOverlay, JunctionArrows, SynthesizedAudioManager 
 } from './components.js';
-
-// ─── BOARD CELL TYPE CLASSIFIER ─────────────────────────────────────
-function getCellType(col, row) {
-    // Home bases (corners)
-    if (col <= 5 && row <= 5) return { type: 'home', player: 0 };     // P0 TL
-    if (col >= 9 && row <= 5) return { type: 'home', player: 1 };     // P1 TR
-    if (col >= 9 && row >= 9) return { type: 'home', player: 2 };     // P2 BR
-    if (col <= 5 && row >= 9) return { type: 'home', player: 3 };     // P3 BL
-    // Center
-    if (col >= 6 && col <= 8 && row >= 6 && row <= 8) return { type: 'center' };
-    // Home stretch lanes (Clockwise standard alignment)
-    if (row === 7 && col >= 1 && col <= 6) return { type: 'stretch', player: 0 }; // Left Arm = Yellow (TL)
-    if (col === 7 && row >= 1 && row <= 6) return { type: 'stretch', player: 1 }; // Top Arm = Blue (TR)
-    if (row === 7 && col >= 8 && col <= 13) return { type: 'stretch', player: 2 }; // Right Arm = Red (BR)
-    if (col === 7 && row >= 8 && row <= 13) return { type: 'stretch', player: 3 }; // Bottom Arm = Green (BL)
-    // Track
-    return { type: 'track' };
-}
-
-function isStartCell(col, row) {
-    return (col === 1 && row === 6) ||  // P0 Yellow (TL exits right to Left Arm top)
-           (col === 8 && row === 1) ||  // P1 Blue (TR exits right to Top Arm right)
-           (col === 13 && row === 8) || // P2 Red (BR exits right to Right Arm bot)
-           (col === 6 && row === 13);   // P3 Green (BL exits right to Bot Arm left)
-}
-
-function getStartPlayer(col, row) {
-    if (col === 1 && row === 6) return 0;
-    if (col === 8 && row === 1) return 1;
-    if (col === 13 && row === 8) return 2;
-    if (col === 6 && row === 13) return 3;
-    return -1;
-}
-
-function isSafeCell(col, row) {
-    return STAR_POSITIONS.some(([sc, sr]) => sc === col && sr === row);
-}
 
 // ─── EMOJI PANEL ─────────────────────────────────────────────────────
 class EmojiPanel {
@@ -95,7 +58,7 @@ export class LudoGame {
         this.cell = CELL;
 
         this.clientPlayer = 2;   // Govind = Red = Bottom-Left
-        this.currentPlayer = 2;  // Start with Red
+        this.currentPlayer = 2;
         this.tokens = [];
         this.gameState = "setup";
         this.playerCount = 4;
@@ -105,14 +68,9 @@ export class LudoGame {
         this.moveSelection = new MoveSelectionOverlay();
         this.junctionArrows = new JunctionArrows();
 
-        // Board never rotates — fixed standard top-down view
-        this.currentRotation = 0;
-        this.targetRotation = 0;
-
         this.winner = null;
         this.dice = new DiceAnimation();
         this.rollQueue = [];
-        this.diceRolled = false;
 
         this.chat = new ChatSystem();
         this.emojiPanel = new EmojiPanel();
@@ -131,7 +89,6 @@ export class LudoGame {
             this.tokens.push(playerTokens);
         }
 
-        // Avatars (positions are just defaults; drawPlayerCard overrides)
         this.avatars = [
             new ProfileAvatar(PLAYER_NAMES[0], PLAYER_COLORS[0], [44, 52]),
             new ProfileAvatar(PLAYER_NAMES[1], PLAYER_COLORS[1], [SCREEN_W - 44, 52]),
@@ -140,7 +97,7 @@ export class LudoGame {
         ];
 
         this.localMicMuted = false;
-        this.remoteMicMuted = [false, false, false, false]; // simulate remote states
+        this.remoteMicMuted = [false, false, false, false];
 
         this.particles = [];
         this.timer = 0;
@@ -157,8 +114,6 @@ export class LudoGame {
         ];
     }
 
-    // Maps logical player index (0-3) to visual position (0=TL, 1=TR, 2=BR, 3=BL)
-    // so that the clientPlayer is always at index 3 (Bottom-Left).
     getVisualIndex(p) {
         return (p - this.clientPlayer + 3 + 4) % 4;
     }
@@ -168,43 +123,34 @@ export class LudoGame {
         const { boardX: bx, boardY: by, cell: C } = this;
 
         ctx.save();
-        
-        // Outer Board Glow / Drop Shadow
         ctx.shadowColor = 'rgba(0, 0, 0, 0.8)';
         ctx.shadowBlur = 20;
         ctx.shadowOffsetX = 0;
         ctx.shadowOffsetY = 10;
-        
-        // Board outer border (Chocolate Brown) with heavy rounded corners
         ctx.fillStyle = COLORS.BOARD_BORDER;
         ctx.beginPath();
         ctx.roundRect(bx - 8, by - 8, this.boardSize + 16, this.boardSize + 16, 24);
         ctx.fill();
-        
         ctx.restore();
 
-        // White base for the grid
         ctx.fillStyle = COLORS.WHITE;
         ctx.beginPath();
         ctx.roundRect(bx, by, this.boardSize, this.boardSize, 16);
         ctx.fill();
 
         ctx.save();
-        // Clip to rounded board inner rect to avoid corners bleeding
         ctx.beginPath();
         ctx.roundRect(bx, by, this.boardSize, this.boardSize, 16);
         ctx.clip();
 
-        // Draw each cell
         for (let row = 0; row < 15; row++) {
             for (let col = 0; col < 15; col++) {
                 const rx = bx + col * C;
                 const ry = by + row * C;
                 const cell = getCellType(col, row);
 
-                if (cell.type === 'center' || cell.type === 'home') continue; 
+                if (cell.type === 'center' || cell.type === 'home') continue;
 
-                // Track / stretch cells
                 let bg = COLORS.TRACK_BG;
                 let isStretch = false;
                 if (cell.type === 'stretch') {
@@ -212,53 +158,41 @@ export class LudoGame {
                     isStretch = true;
                 }
                 const isStart = isStartCell(col, row);
-                if (isStart) {
-                    bg = PLAYER_COLORS[getStartPlayer(col, row)];
-                }
+                if (isStart) bg = PLAYER_COLORS[getStartPlayer(col, row)];
 
-                // ── Main fill ──
                 ctx.fillStyle = bg;
                 ctx.fillRect(rx, ry, C, C);
 
                 if (isStretch || isStart) {
-                    // Sharp white inner border for colored cells (image_1 style)
                     ctx.strokeStyle = 'rgba(255,255,255,0.40)';
                     ctx.lineWidth = 1.5;
                     ctx.strokeRect(rx + 1.5, ry + 1.5, C - 3, C - 3);
-                    // Dark outer edge
                     ctx.strokeStyle = 'rgba(0,0,0,0.22)';
                     ctx.lineWidth = 1;
                     ctx.strokeRect(rx, ry, C, C);
                 } else {
-                    // Track cell: outer border
                     ctx.strokeStyle = 'rgba(170,170,170,0.9)';
                     ctx.lineWidth = 1;
                     ctx.strokeRect(rx, ry, C, C);
-                    // Inner inset box (creates the "outlined box" texture of image_1)
                     ctx.strokeStyle = 'rgba(230,230,230,0.7)';
                     ctx.lineWidth = 1;
                     ctx.strokeRect(rx + 2.5, ry + 2.5, C - 5, C - 5);
                 }
 
-                // Draw 🚫 prohibition circle on start cells
                 if (isStart) {
                     this.drawStartArrow(ctx, col, row, rx, ry, C, getStartPlayer(col, row));
                 }
             }
         }
 
-        // Center (winning zone) - draw before home bases to stay under
         this.drawCenter(ctx);
+        ctx.restore();
 
-        ctx.restore(); // remove clip
+        this.drawHomeBase(ctx, bx,         by,         PLAYER_COLORS[0], PLAYER_DARK[0], 0);
+        this.drawHomeBase(ctx, bx + 9 * C, by,         PLAYER_COLORS[1], PLAYER_DARK[1], 1);
+        this.drawHomeBase(ctx, bx + 9 * C, by + 9 * C, PLAYER_COLORS[2], PLAYER_DARK[2], 2);
+        this.drawHomeBase(ctx, bx,         by + 9 * C, PLAYER_COLORS[3], PLAYER_DARK[3], 3);
 
-        // Draw home base areas dynamically from player config
-        this.drawHomeBase(ctx, bx,         by,         PLAYER_COLORS[0], PLAYER_DARK[0], 0); // TL
-        this.drawHomeBase(ctx, bx + 9 * C, by,         PLAYER_COLORS[1], PLAYER_DARK[1], 1); // TR
-        this.drawHomeBase(ctx, bx + 9 * C, by + 9 * C, PLAYER_COLORS[2], PLAYER_DARK[2], 2); // BR
-        this.drawHomeBase(ctx, bx,         by + 9 * C, PLAYER_COLORS[3], PLAYER_DARK[3], 3); // BL
-
-        // Stars on top of everything
         this.drawStarsOnBoard(ctx);
     }
 
@@ -266,37 +200,31 @@ export class LudoGame {
         const C = this.cell;
         const size = 6 * C;
 
-        // Background
-        ctx.fillStyle = darkColor; // Darker shade as requested
+        ctx.fillStyle = darkColor;
         ctx.beginPath();
-        // Adjust radius depending on corner
-        let radii = [0,0,0,0]; // [TopLeft, TopRight, BottomRight, BottomLeft]
-        if(player === 0) radii = [16,0,0,0];      // P0 TL
-        else if(player === 1) radii = [0,16,0,0]; // P1 TR
-        else if(player === 2) radii = [0,0,16,0]; // P2 BR
-        else if(player === 3) radii = [0,0,0,16]; // P3 BL
+        let radii = [0,0,0,0];
+        if(player === 0) radii = [16,0,0,0];
+        else if(player === 1) radii = [0,16,0,0];
+        else if(player === 2) radii = [0,0,16,0];
+        else if(player === 3) radii = [0,0,0,16];
         ctx.roundRect(x, y, size, size, radii);
         ctx.fill();
-        
         ctx.strokeStyle = 'rgba(0,0,0,0.2)';
         ctx.lineWidth = 2;
         ctx.stroke();
 
-        // White inner box
         const margin = C;
         ctx.fillStyle = '#FFFFFF';
         ctx.beginPath();
         ctx.roundRect(x + margin, y + margin, 4 * C, 4 * C, 20);
         ctx.fill();
 
-        // Light colored inner
         ctx.fillStyle = mainColor;
         const innerM = C * 0.25;
         ctx.beginPath();
         ctx.roundRect(x + margin + innerM, y + margin + innerM, 4*C - innerM*2, 4*C - innerM*2, 16);
         ctx.fill();
 
-        // 4 token spots
         const spots = [
             [x + 1.75*C, y + 1.75*C],
             [x + 4.25*C, y + 1.75*C],
@@ -304,38 +232,31 @@ export class LudoGame {
             [x + 4.25*C, y + 4.25*C],
         ];
         spots.forEach(([sx, sy]) => {
-            // White ring
             ctx.fillStyle = '#FFFFFF';
             ctx.beginPath(); ctx.arc(sx, sy, C * 0.45, 0, Math.PI * 2); ctx.fill();
-            // Colored fill
             const grad = ctx.createRadialGradient(sx - C*0.1, sy - C*0.1, 0, sx, sy, C*0.35);
             grad.addColorStop(0, '#FFFFFF');
             grad.addColorStop(1, '#DDDDDD');
             ctx.fillStyle = grad;
             ctx.beginPath(); ctx.arc(sx, sy, C * 0.38, 0, Math.PI * 2); ctx.fill();
-            // Inner shadow
             ctx.strokeStyle = 'rgba(0,0,0,0.1)';
             ctx.lineWidth = 2;
             ctx.beginPath(); ctx.arc(sx, sy, C * 0.38, 0, Math.PI * 2); ctx.stroke();
         });
     }
 
-    // Draws a 🚫-style prohibition circle on start cells (replaces old arrow)
     drawStartArrow(ctx, col, row, rx, ry, C, player) {
         const cx = rx + C / 2;
         const cy = ry + C / 2;
         const r  = C * 0.36;
         ctx.save();
-        // White circle fill
         ctx.beginPath();
         ctx.arc(cx, cy, r, 0, Math.PI * 2);
         ctx.fillStyle = 'rgba(255,255,255,0.92)';
         ctx.fill();
-        // Red prohibition ring
         ctx.strokeStyle = 'rgba(210,0,0,0.88)';
         ctx.lineWidth = r * 0.30;
         ctx.stroke();
-        // Horizontal bar
         ctx.beginPath();
         ctx.moveTo(cx - r * 0.68, cy);
         ctx.lineTo(cx + r * 0.68, cy);
@@ -349,14 +270,13 @@ export class LudoGame {
     drawCenter(ctx) {
         const { boardX: bx, boardY: by, cell: C } = this;
         const cx = bx + 7.5 * C, cy = by + 7.5 * C;
-        const h = C * 1.5; // exactly fills the 3×3 center
+        const h = C * 1.5;
 
-        // 4 triangles (Colors matched perfectly to their stretches)
         const triangles = [
-            { pts: [[cx,cy],[cx-h,cy-h],[cx+h,cy-h]], color: COLORS.BLUE   }, // Top (Player 1)
-            { pts: [[cx,cy],[cx+h,cy-h],[cx+h,cy+h]], color: COLORS.RED    }, // Right (Player 2)
-            { pts: [[cx,cy],[cx-h,cy+h],[cx+h,cy+h]], color: COLORS.GREEN  }, // Bottom (Player 3)
-            { pts: [[cx,cy],[cx-h,cy-h],[cx-h,cy+h]], color: COLORS.YELLOW }, // Left (Player 0)
+            { pts: [[cx,cy],[cx-h,cy-h],[cx+h,cy-h]], color: COLORS.BLUE   },
+            { pts: [[cx,cy],[cx+h,cy-h],[cx+h,cy+h]], color: COLORS.RED    },
+            { pts: [[cx,cy],[cx-h,cy+h],[cx+h,cy+h]], color: COLORS.GREEN  },
+            { pts: [[cx,cy],[cx-h,cy-h],[cx-h,cy+h]], color: COLORS.YELLOW },
         ];
 
         triangles.forEach(t => {
@@ -376,7 +296,6 @@ export class LudoGame {
             ctx.lineTo(t.pts[2][0], t.pts[2][1]);
             ctx.closePath(); ctx.stroke();
         });
-        // Trophy in center
         ctx.fillStyle = 'rgba(255,255,255,0.18)';
         ctx.beginPath(); ctx.arc(cx, cy, C * 0.65, 0, Math.PI * 2); ctx.fill();
         ctx.font = `${Math.ceil(C * 0.85)}px Arial`;
@@ -384,23 +303,19 @@ export class LudoGame {
         ctx.fillText('🏆', cx, cy + C * 0.3);
     }
 
-    // Draws 🚫-style prohibition circles at midpoint safe squares
     drawStarsOnBoard(ctx) {
         STAR_POSITIONS.forEach(([col, row]) => {
             if (!isStartCell(col, row)) {
                 const [px, py] = this.getCellPixel(col, row);
                 const r = this.cell * 0.33;
                 ctx.save();
-                // White fill
                 ctx.beginPath();
                 ctx.arc(px, py, r, 0, Math.PI * 2);
                 ctx.fillStyle = 'rgba(255,255,255,0.90)';
                 ctx.fill();
-                // Red ring
                 ctx.strokeStyle = 'rgba(210,0,0,0.85)';
                 ctx.lineWidth = r * 0.28;
                 ctx.stroke();
-                // Horizontal bar
                 ctx.beginPath();
                 ctx.moveTo(px - r * 0.68, py);
                 ctx.lineTo(px + r * 0.68, py);
@@ -412,7 +327,6 @@ export class LudoGame {
             }
         });
     }
-
 
     // ─── UPDATE / DRAW ───────────────────────────────────────────────
     update() {
@@ -426,13 +340,28 @@ export class LudoGame {
             currentTimerPercent = (this.turnEndsAt - now) / this.turnDuration;
         }
 
+        this.junctionArrows.update();
+
         this.avatars.forEach((a, i) => {
             a.update();
             a.active = (i === this.currentPlayer);
             a.timerPercent = a.active ? currentTimerPercent : 0;
         });
 
-        this.tokens.forEach((pt, i) => { if (i < this.playerCount) pt.forEach(t => t.update()); });
+        this.tokens.forEach((pt, p) => { 
+            if (p < this.playerCount) {
+                pt.forEach(t => {
+                    t.update();
+                    t.isCurrentPlayer = (p === this.currentPlayer);
+                    // FIX: check ALL rolls in queue, not just first
+                    if (t.isCurrentPlayer && this.rollQueue.length > 0) {
+                        t.isMoveable = this.rollQueue.some(r => this.canTokenMove(t, r));
+                    } else {
+                        t.isMoveable = false;
+                    }
+                });
+            }
+        });
     }
 
     draw(ctx) {
@@ -451,14 +380,15 @@ export class LudoGame {
         ctx.rotate(angle);
         ctx.translate(-cx, -cy);
 
-        // Draw rotated game elements
         this.drawBoard(ctx);
-        this.drawTokenGlows(ctx);
         this.tokens.forEach((pt, p) => { if (p < this.playerCount) pt.forEach(t => t.draw(ctx)); });
-        this.junctionArrows.draw(ctx);
         
         ctx.restore();
         // --- END ROTATION ---
+
+        // FIX: Junction arrows drawn OUTSIDE rotation (UI layer) so they appear correctly
+        // They use screen-space coordinates that we calculate from board coords
+        this.junctionArrows.draw(ctx);
 
         // UI Overlays (Not rotated)
         this.drawTopBar(ctx);
@@ -466,7 +396,11 @@ export class LudoGame {
         this.drawDiceArea(ctx);
         this.drawParticles(ctx);
 
-        this.moveSelection.draw(ctx);
+        if (this.moveSelection.activeToken) {
+            const t = this.moveSelection.activeToken;
+            const [sx, sy] = this.boardToScreen(t.px + t.offset.x, t.py + t.offset.y);
+            this.moveSelection.draw(ctx, sx, sy);
+        }
 
         if (this.chat.visible) this.chat.draw(ctx, 10, 390, 290, 160);
         
@@ -478,14 +412,12 @@ export class LudoGame {
 
     // ─── SETUP SCREEN ────────────────────────────────────────────────
     drawSetupScreen(ctx) {
-        // Background gradient
         const grad = ctx.createLinearGradient(0, 0, 0, SCREEN_H);
         grad.addColorStop(0, '#1A0A35');
         grad.addColorStop(1, '#4A1A6B');
         ctx.fillStyle = grad;
         ctx.fillRect(0, 0, SCREEN_W, SCREEN_H);
 
-        // Title
         ctx.fillStyle = COLORS.GOLD;
         ctx.font = 'bold 36px Arial';
         ctx.textAlign = 'center';
@@ -494,7 +426,6 @@ export class LudoGame {
         ctx.fillStyle = COLORS.GRAY;
         ctx.fillText('Select number of players', SCREEN_W / 2, 155);
 
-        // Player count buttons
         [2, 3, 4].forEach((n, i) => {
             const x = SCREEN_W / 2, y = 220 + i * 85;
             const selected = this.playerCount === n;
@@ -507,7 +438,6 @@ export class LudoGame {
             ctx.fillText(`${n} Players`, x, y + 8);
         });
 
-        // Team Up toggle (only for 4 players)
         if (this.playerCount === 4) {
             const tx = SCREEN_W / 2, ty = 488;
             ctx.fillStyle = this.teamUpMode ? COLORS.GREEN : '#3A1060';
@@ -519,7 +449,6 @@ export class LudoGame {
             ctx.fillText(this.teamUpMode ? '✅ TEAM UP ON' : '👥 TEAM UP', tx, ty + 7);
         }
 
-        // START button
         const sy = this.playerCount === 4 ? 575 : 490;
         ctx.fillStyle = COLORS.GREEN;
         ctx.beginPath(); ctx.roundRect(SCREEN_W/2 - 70, sy - 26, 140, 52, 14); ctx.fill();
@@ -537,46 +466,11 @@ export class LudoGame {
         ctx.lineWidth = 1;
         ctx.beginPath(); ctx.moveTo(0, 108); ctx.lineTo(SCREEN_W, 108); ctx.stroke();
         
-        // Draw players who are visually at the top (Visual 0 and 1)
         for (let p = 0; p < 4; p++) {
             if (p >= this.playerCount) continue;
             const v = this.getVisualIndex(p);
             if (v === 0 || v === 1) this.drawPlayerCard(ctx, p, v);
         }
-    }
-
-    // ─── TILE GLOWS ──────────────────────────────────────────────────
-    drawTokenGlows(ctx) {
-        if (this.gameState === "setup" || this.gameState === "lobby") return;
-
-        ctx.save();
-        ctx.globalCompositeOperation = "screen";
-
-        this.tokens.forEach((pt, p) => {
-            if (p >= this.playerCount) return;
-            pt.forEach(t => {
-                // Glow the exact box/tile the token is sitting on
-                if (t.inHome || t.finished) return; 
-                
-                const margin = 2;
-                const gx = t.px - this.cell/2 + margin;
-                const gy = t.py - this.cell/2 + margin;
-                const sz = this.cell - margin*2;
-
-                ctx.globalAlpha = 0.4 + Math.sin(this.timer * 0.1) * 0.2;
-                ctx.fillStyle = PLAYER_LIGHT[p];
-                ctx.beginPath();
-                ctx.roundRect(gx, gy, sz, sz, 4);
-                ctx.fill();
-                
-                // Outer bright border for the tile
-                ctx.strokeStyle = '#FFF';
-                ctx.lineWidth = 2;
-                ctx.stroke();
-            });
-        });
-
-        ctx.restore();
     }
 
     // ─── BOTTOM BAR ──────────────────────────────────────────────────
@@ -588,14 +482,12 @@ export class LudoGame {
         ctx.lineWidth = 1;
         ctx.beginPath(); ctx.moveTo(0, barY); ctx.lineTo(SCREEN_W, barY); ctx.stroke();
 
-        // Draw players who are visually at the bottom (Visual 2 and 3)
         for (let p = 0; p < 4; p++) {
             if (p >= this.playerCount) continue;
             const v = this.getVisualIndex(p);
             if (v === 2 || v === 3) this.drawPlayerCard(ctx, p, v);
         }
 
-        // Graphics-based EMOJI / CHAT / MIC / SPEAKER buttons at very bottom
         const buttons = [
             { id: 'emoji', label: 'EMOJI', state: this.emojiPanel.visible },
             { id: 'chat', label: 'CHAT', state: this.chat.visible },
@@ -610,26 +502,22 @@ export class LudoGame {
             ctx.beginPath(); ctx.roundRect(bx, by, 72, 28, 7); ctx.fill();
             ctx.strokeStyle = 'rgba(255,255,255,0.18)'; ctx.lineWidth = 1; ctx.stroke();
             
-            // Draw Icon SVG Paths centered inside the button
             const iconX = bx + 36;
             const iconY = by + 14;
             ctx.fillStyle = '#fff';
             ctx.strokeStyle = '#fff';
             
             if (btn.id === 'emoji') {
-                // Happy outline face
                 ctx.lineWidth = 1.5;
                 ctx.beginPath(); ctx.arc(iconX, iconY, 10, 0, Math.PI*2); ctx.stroke();
                 ctx.beginPath(); ctx.arc(iconX - 3, iconY - 2, 1.5, 0, Math.PI*2); ctx.fill();
                 ctx.beginPath(); ctx.arc(iconX + 3, iconY - 2, 1.5, 0, Math.PI*2); ctx.fill();
                 ctx.beginPath(); ctx.arc(iconX, iconY, 5, 0, Math.PI); ctx.stroke();
             } else if (btn.id === 'chat') {
-                // Speech bubble 
                 ctx.lineWidth = 1.5;
                 ctx.beginPath(); ctx.roundRect(iconX - 10, iconY - 7, 20, 14, 4); ctx.stroke();
                 ctx.beginPath(); ctx.moveTo(iconX - 5, iconY + 7); ctx.lineTo(iconX - 3, iconY + 12); ctx.lineTo(iconX, iconY + 7); ctx.fill();
             } else if (btn.id === 'mic') {
-                // Mic Icon
                 ctx.beginPath(); ctx.roundRect(iconX - 3, iconY - 8, 6, 12, 3); ctx.fill();
                 ctx.beginPath(); ctx.arc(iconX, iconY - 2, 8, 0, Math.PI); ctx.stroke();
                 ctx.beginPath(); ctx.moveTo(iconX, iconY + 6); ctx.lineTo(iconX, iconY + 10); ctx.stroke();
@@ -639,14 +527,11 @@ export class LudoGame {
                     ctx.beginPath(); ctx.moveTo(iconX - 10, iconY - 8); ctx.lineTo(iconX + 10, iconY + 8); ctx.stroke();
                 }
             } else if (btn.id === 'audio') {
-                // Speaker Icon
                 ctx.beginPath(); ctx.moveTo(iconX - 6, iconY - 3); ctx.lineTo(iconX - 3, iconY - 3);
                 ctx.lineTo(iconX + 2, iconY - 7); ctx.lineTo(iconX + 2, iconY + 7);
                 ctx.lineTo(iconX - 3, iconY + 3); ctx.lineTo(iconX - 6, iconY + 3); ctx.fill();
                 ctx.beginPath(); ctx.arc(iconX + 2, iconY, 5, -Math.PI/3, Math.PI/3); ctx.stroke();
                 ctx.beginPath(); ctx.arc(iconX + 2, iconY, 8, -Math.PI/3, Math.PI/3); ctx.stroke();
-                
-                // Mute logic
                 if (!this.speakerPanelVisible) {
                     ctx.strokeStyle = '#FF3333'; ctx.lineWidth = 2;
                     ctx.beginPath(); ctx.moveTo(iconX - 8, iconY - 8); ctx.lineTo(iconX + 10, iconY + 8); ctx.stroke();
@@ -658,19 +543,17 @@ export class LudoGame {
     // ─── PLAYER CARD ─────────────────────────────────────────────────
     drawPlayerCard(ctx, i, v) {
         const isTop    = v <= 1;
-        const isRight  = v === 1 || v === 2; // Remapped right side
+        const isRight  = v === 1 || v === 2;
         const isActive = i === this.currentPlayer;
         const color    = PLAYER_COLORS[i];
         const name     = PLAYER_NAMES[i];
 
-        const avR =  30;
-        const avX  = isRight ? SCREEN_W - 14 - avR : 14 + avR;
-        const avY  = isTop   ? 54 : SCREEN_H - 108;
+        const avR = 30;
+        const avX = isRight ? SCREEN_W - 14 - avR : 14 + avR;
+        const avY = isTop   ? 54 : SCREEN_H - 108;
 
-        // Update avatar position so ProfileAvatar.draw() isn't needed separately
         this.avatars[i].position = [avX, avY];
 
-        // Active glow
         if (isActive) {
             const pulse = (Math.sin(this.timer * 0.12) + 1) / 2;
             ctx.strokeStyle = `rgba(255,255,255,${0.3 + pulse * 0.6})`;
@@ -678,7 +561,6 @@ export class LudoGame {
             ctx.beginPath(); ctx.arc(avX, avY, avR + 7, 0, Math.PI * 2); ctx.stroke();
         }
 
-        // Circle fill with gradient
         const grad = ctx.createRadialGradient(avX - 8, avY - 8, 2, avX, avY, avR);
         grad.addColorStop(0, PLAYER_LIGHT[i]);
         grad.addColorStop(1, color);
@@ -688,34 +570,122 @@ export class LudoGame {
         ctx.beginPath(); ctx.arc(avX, avY, avR, 0, Math.PI * 2); ctx.fill();
         ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
 
-        // Initials
-        ctx.fillStyle = '#fff';
-        ctx.font = 'bold 16px Arial';
-        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-        ctx.fillText(name.substring(0, 2).toUpperCase(), avX, avY);
-        ctx.textBaseline = 'alphabetic';
+        if (!isActive) {
+            ctx.fillStyle = '#fff';
+            ctx.font = 'bold 16px Arial';
+            ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+            ctx.fillText(name.substring(0, 2).toUpperCase(), avX, avY);
+            ctx.textBaseline = 'alphabetic';
+        }
 
-        // Border ring
         ctx.strokeStyle = isActive ? '#fff' : COLORS.GOLD;
         ctx.lineWidth = 2.5;
         ctx.beginPath(); ctx.arc(avX, avY, avR, 0, Math.PI * 2); ctx.stroke();
 
-        // Name label
         ctx.fillStyle = 'rgba(255,255,255,0.85)';
         ctx.font = '11px Inter, Arial'; ctx.textAlign = 'center';
-        const nameY = isTop ? avY + avR + 14 : avY + avR + 14;
-        ctx.fillText(name.substring(0, 14), avX, nameY);
+        ctx.fillText(name.substring(0, 14), avX, avY + avR + 14);
 
-        // Remote Speaker Indicator
+        if (isActive) {
+            const timerR = avR + 11;
+            const percent = Math.max(0.001, Math.min(1, this.avatars[i].timerPercent || 0));
+
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+            ctx.lineWidth = 6;
+            ctx.lineCap = 'butt';
+            ctx.beginPath();
+            ctx.arc(avX, avY, timerR, 0, Math.PI * 2);
+            ctx.stroke();
+
+            let timerColor = '#4CAF50';
+            if      (percent < 0.25) timerColor = '#F44336';
+            else if (percent < 0.55) timerColor = '#FF9800';
+
+            ctx.strokeStyle = timerColor;
+            ctx.lineWidth = 6;
+            ctx.lineCap = 'round';
+            ctx.beginPath();
+            ctx.arc(avX, avY, timerR, -Math.PI / 2, -Math.PI / 2 + (Math.PI * 2 * percent));
+            ctx.stroke();
+            ctx.lineCap = 'butt';
+
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.60)';
+            ctx.beginPath();
+            ctx.arc(avX, avY, avR - 1, 0, Math.PI * 2);
+            ctx.fill();
+
+            const secs = Math.ceil(percent * 10);
+            ctx.fillStyle = timerColor;
+            ctx.font = 'bold 20px Arial';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(secs, avX, avY);
+            ctx.textBaseline = 'alphabetic';
+        }
+
+        // AUTO badge
+        const badgeW = 72, badgeH = 26;
+        const badgeX = avX - badgeW / 2;
+        const badgeY = isTop ? avY - avR - 38 : avY + avR + 22;
+
+        ctx.fillStyle = this.avatars[i].botEnabled ? '#15803d' : '#5b21b6';
+        ctx.beginPath();
+        ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 8);
+        ctx.fill();
+
+        ctx.strokeStyle = this.avatars[i].botEnabled ? '#4ade80' : '#a78bfa';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 11px Arial';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('AUTO', badgeX + 24, badgeY + 13);
+
+        const tbX = badgeX + 46, tbY = badgeY + 5;
+        ctx.fillStyle = this.avatars[i].botEnabled ? '#166534' : '#3b0764';
+        ctx.beginPath();
+        ctx.roundRect(tbX, tbY, 20, 16, 4);
+        ctx.fill();
+        ctx.strokeStyle = this.avatars[i].botEnabled ? '#4ade80' : '#7c3aed';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+
+        if (this.avatars[i].botEnabled) {
+            ctx.strokeStyle = '#fff';
+            ctx.lineWidth = 2;
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            ctx.beginPath();
+            ctx.moveTo(tbX + 4,  tbY + 8);
+            ctx.lineTo(tbX + 8,  tbY + 12);
+            ctx.lineTo(tbX + 16, tbY + 4);
+            ctx.stroke();
+        }
+
+        const secs2 = Math.ceil((this.avatars[i].timerPercent || 0) * 10);
+        if (isActive && secs2 <= 3 && secs2 > 0 && !this.avatars[i].botEnabled) {
+            const arrowX = avX;
+            const arrowY = badgeY - 14 + Math.sin(this.timer * 0.2) * 4;
+            ctx.fillStyle = '#22c55e';
+            ctx.shadowColor = '#22c55e';
+            ctx.shadowBlur = 8;
+            ctx.beginPath();
+            ctx.moveTo(arrowX - 8, arrowY);
+            ctx.lineTo(arrowX + 8, arrowY);
+            ctx.lineTo(arrowX, arrowY + 12);
+            ctx.closePath();
+            ctx.fill();
+            ctx.shadowBlur = 0;
+        }
+
         if (i !== this.clientPlayer && i < this.playerCount) {
             const spkX = isRight ? avX - avR - 10 : avX + avR + 10;
             const spkY = avY + 12;
-            
             ctx.fillStyle = 'rgba(10,5,20,0.8)';
             ctx.beginPath(); ctx.arc(spkX, spkY, 12, 0, Math.PI*2); ctx.fill();
             ctx.strokeStyle = 'rgba(255,255,255,0.3)'; ctx.lineWidth = 1; ctx.stroke();
-            
-            // Speaker icon
             ctx.fillStyle = '#FFF';
             ctx.beginPath();
             ctx.moveTo(spkX - 3, spkY - 2); ctx.lineTo(spkX - 1, spkY - 2);
@@ -737,57 +707,94 @@ export class LudoGame {
     // ─── DICE AREA ───────────────────────────────────────────────────
     drawDiceArea(ctx) {
         if (this.gameState === 'setup') return;
-        const p       = this.currentPlayer;
-        const v       = this.getVisualIndex(p);
-        const isTop   = v <= 1;
-        const isRight = v === 1 || v === 2;
 
-        // Cluster anchor: dice left, crown right
-        const clX = isRight ? SCREEN_W - 238 : 92;
-        const clY = isTop ? 18 : SCREEN_H - 152;
+        const v = this.getVisualIndex(this.currentPlayer);
+        
+        const dicePositions = {
+            3: { x: 92,              y: SCREEN_H - 152 },
+            0: { x: 92,              y: 18 },
+            1: { x: SCREEN_W - 238, y: 18 },
+            2: { x: SCREEN_W - 238, y: SCREEN_H - 152 }
+        };
 
-        // 3D Dice (Glow removed as requested)
+        const pos = dicePositions[v];
+        const clX = pos.x;
+        const clY = pos.y;
+
         this.draw3DDice(ctx, clX, clY, 46);
 
-        // Crown / Roll button (big circle)
         const crX = clX + 62;
         const crY = clY + 23;
         const crR = 22;
-        ctx.shadowColor = 'rgba(0,0,0,0.45)'; ctx.shadowBlur = 10; ctx.shadowOffsetY = 3;
+        ctx.shadowColor = 'rgba(0,0,0,0.45)'; 
+        ctx.shadowBlur = 10; 
+        ctx.shadowOffsetY = 3;
         ctx.fillStyle = this.gameState === 'roll' ? COLORS.RED : '#444';
         ctx.beginPath(); ctx.arc(crX, crY, crR, 0, Math.PI * 2); ctx.fill();
         ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
-        ctx.strokeStyle = 'rgba(255,255,255,0.5)'; ctx.lineWidth = 2;
+        ctx.strokeStyle = 'rgba(255,255,255,0.5)'; 
+        ctx.lineWidth = 2;
         ctx.beginPath(); ctx.arc(crX, crY, crR, 0, Math.PI * 2); ctx.stroke();
         ctx.fillStyle = COLORS.GOLD;
-        ctx.font = 'bold 20px Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.font = 'bold 20px Arial'; 
+        ctx.textAlign = 'center'; 
+        ctx.textBaseline = 'middle';
         ctx.fillText('♛', crX, crY);
         ctx.textBaseline = 'alphabetic';
 
-        // Rolled value bubble (shown when a roll is pending)
         if (this.rollQueue.length > 0) {
             const rvX = clX + 132;
             const rvY = clY + 18;
-            ctx.fillStyle = PLAYER_COLORS[p];
+            ctx.fillStyle = PLAYER_COLORS[this.currentPlayer];
             ctx.beginPath(); ctx.arc(rvX, rvY, 13, 0, Math.PI * 2); ctx.fill();
             ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5;
             ctx.beginPath(); ctx.arc(rvX, rvY, 13, 0, Math.PI * 2); ctx.stroke();
-            ctx.fillStyle = '#fff'; ctx.font = 'bold 12px Arial'; ctx.textAlign = 'center';
+            ctx.fillStyle = '#fff'; 
+            ctx.font = 'bold 12px Arial'; 
+            ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
             ctx.fillText(String(this.rollQueue[0]), rvX, rvY);
             ctx.textBaseline = 'alphabetic';
         }
+
+        if (this.network && 
+            this.currentPlayer === this.network.playerColor && 
+            this.gameState === 'roll' && 
+            !this.dice.rolling) {
+            this.drawRollHint(ctx, clX + 23, clY + 23);
+        }
+    }
+
+    drawRollHint(ctx, x, y) {
+        ctx.save();
+        const bounce = Math.sin(this.timer * 0.15) * 10;
+        const tx = x, ty = y - 65 + bounce;
+        
+        ctx.fillStyle = '#4CAF50';
+        ctx.shadowColor = 'rgba(76, 175, 80, 0.8)';
+        ctx.shadowBlur = 15;
+        
+        ctx.beginPath();
+        ctx.roundRect(tx - 6, ty - 25, 12, 25, 4);
+        ctx.fill();
+        
+        ctx.beginPath();
+        ctx.moveTo(tx - 18, ty);
+        ctx.lineTo(tx + 18, ty);
+        ctx.lineTo(tx, ty + 20);
+        ctx.closePath();
+        ctx.fill();
+        
+        ctx.restore();
     }
 
     draw3DDice(ctx, x, y, size) {
         const val = this.dice.rolling ? this.dice.displayValue : this.dice.value;
         const r = 10;
 
-        // Drop shadow
         ctx.fillStyle = 'rgba(0,0,0,0.4)';
         ctx.beginPath(); ctx.roundRect(x+5, y+5, size, size, r+2); ctx.fill();
 
-        // Glass-gradient body
         const bodyGrad = ctx.createLinearGradient(x, y, x+size, y+size);
         bodyGrad.addColorStop(0, '#FFFFFF');
         bodyGrad.addColorStop(0.5, '#F0F0F0');
@@ -795,23 +802,19 @@ export class LudoGame {
         ctx.fillStyle = bodyGrad;
         ctx.beginPath(); ctx.roundRect(x, y, size, size, r); ctx.fill();
 
-        // Edge shading
         ctx.strokeStyle = '#A0A0A0';
         ctx.lineWidth = 2; ctx.stroke();
 
-        // Inner bevel
         ctx.strokeStyle = 'rgba(255,255,255,0.8)';
         ctx.lineWidth = 1.5;
         ctx.beginPath(); ctx.roundRect(x+3, y+3, size-6, size-6, r-2); ctx.stroke();
 
-        // Top-left shine
         const shineGrad = ctx.createLinearGradient(x, y, x+size*0.5, y+size*0.5);
         shineGrad.addColorStop(0, 'rgba(255,255,255,0.6)');
         shineGrad.addColorStop(1, 'rgba(255,255,255,0)');
         ctx.fillStyle = shineGrad;
         ctx.beginPath(); ctx.roundRect(x+4, y+4, size-8, size*0.55, r-3); ctx.fill();
 
-        // Dots
         const dp = {
             1:[[.5,.5]],
             2:[[.25,.28],[.75,.72]],
@@ -825,54 +828,13 @@ export class LudoGame {
             const dotX = x + dx * size;
             const dotY = y + dy * size;
             const dotR = size / 10;
-            // Dot shadow
             ctx.fillStyle = 'rgba(0,0,0,0.15)';
             ctx.beginPath(); ctx.arc(dotX+1,dotY+1,dotR,0,Math.PI*2); ctx.fill();
-            // Dot
             const dotGrad = ctx.createRadialGradient(dotX-1, dotY-1, 0, dotX, dotY, dotR);
             dotGrad.addColorStop(0, '#555');
             dotGrad.addColorStop(1, '#111');
             ctx.fillStyle = dotGrad;
             ctx.beginPath(); ctx.arc(dotX, dotY, dotR, 0, Math.PI*2); ctx.fill();
-        });
-    }
-
-    // ─── TURN INDICATOR ──────────────────────────────────────────────
-    drawTurnIndicator(ctx) {
-        const y = this.boardY + this.boardSize + 12 + Math.sin(this.timer * 0.1) * 4;
-        ctx.fillStyle = PLAYER_COLORS[this.currentPlayer];
-        ctx.beginPath();
-        ctx.moveTo(SCREEN_W/2, y+12); ctx.lineTo(SCREEN_W/2-10, y); ctx.lineTo(SCREEN_W/2+10, y);
-        ctx.closePath(); ctx.fill();
-        ctx.strokeStyle = '#FFF'; ctx.lineWidth = 1; ctx.stroke();
-
-        ctx.font = '12px Arial'; ctx.textAlign = 'center';
-        ctx.fillStyle = COLORS.WHITE;
-        ctx.fillText(PLAYER_NAMES[this.currentPlayer] + "'s Turn", SCREEN_W/2, y + 26);
-    }
-
-    // ─── SPEAKER PANEL ───────────────────────────────────────────────
-    drawSpeakerPanel(ctx) {
-        const pX = SCREEN_W/2 - 70, pY = SCREEN_H - 155;
-        const others = Array.from({length: this.playerCount}, (_,i) => i).filter(i => i !== this.currentPlayer);
-        const h = others.length * 36 + 20;
-        ctx.fillStyle = 'rgba(30,12,55,0.96)';
-        ctx.beginPath(); ctx.roundRect(pX, pY, 140, h, 10); ctx.fill();
-        ctx.strokeStyle = COLORS.GOLD; ctx.lineWidth = 1.5; ctx.stroke();
-
-        let dY = pY + 22;
-        others.forEach(i => {
-            ctx.fillStyle = PLAYER_COLORS[i];
-            ctx.beginPath(); ctx.arc(pX + 18, dY - 4, 7, 0, Math.PI*2); ctx.fill();
-            ctx.fillStyle = COLORS.WHITE; ctx.font = '13px Arial'; ctx.textAlign = 'left';
-            ctx.fillText(PLAYER_NAMES[i].split(' ')[0], pX + 30, dY + 1);
-            const muted = this.muteStates[this.currentPlayer][i];
-            ctx.fillStyle = muted ? COLORS.RED : COLORS.GREEN;
-            ctx.beginPath(); ctx.roundRect(pX + 100, dY - 10, 28, 14, 7); ctx.fill();
-            ctx.fillStyle = '#fff'; ctx.font = '10px Arial';
-            ctx.textAlign = 'center';
-            ctx.fillText(muted ? 'OFF' : 'ON', pX + 114, dY + 1);
-            dY += 36;
         });
     }
 
@@ -900,37 +862,49 @@ export class LudoGame {
 
     // ─── GAME LOGIC ──────────────────────────────────────────────────
     rollDice() {
-        if (this.gameState === "roll" && !this.dice.rolling) {
-            this.dice.roll();
-            this.diceRolled = true;
-            this.audio.playDiceRoll();
-            setTimeout(() => {
-                const val = this.dice.value;
-                this.rollQueue.push(val);
-                this.chat.addMessage(PLAYER_NAMES[this.currentPlayer], `Rolled ${val}!`, PLAYER_COLORS[this.currentPlayer]);
-                
-                const sixCount = this.rollQueue.filter(v => v === 6).length;
-                if (sixCount === 3) {
-                    this.rollQueue = [];
-                    this.diceRolled = false;
-                    this.nextTurn();
-                } else if (val === 6) {
-                    this.diceRolled = false; // Roll again
-                } else {
-                    this.gameState = "move";
-                }
-                
-                if (this.gameState === "move" && !this.canAnyMove()) setTimeout(() => this.nextTurn(), 800);
-            }, 600);
-        }
+        if (this.gameState !== "roll" || this.dice.rolling) return;
+
+        this.dice.roll();
+        this.audio.playDiceRoll();
+
+        setTimeout(() => {
+            const val = this.dice.value;
+            this.rollQueue.push(val);
+            this.chat.addMessage(
+                PLAYER_NAMES[this.currentPlayer], 
+                `Rolled ${val}!`, 
+                PLAYER_COLORS[this.currentPlayer]
+            );
+
+            const sixCount = this.rollQueue.filter(v => v === 6).length;
+
+            if (sixCount >= 3) {
+                // Teen 6 = turn khatam
+                this.rollQueue = [];
+                this.nextTurn();
+                return;
+            }
+
+            if (val === 6) {
+                // 6 aaya = roll again, gameState "roll" hi rehta hai
+                return;
+            }
+
+            // 6 nahi aaya = move phase
+            this.gameState = "move";
+            
+            if (!this.canAnyMove()) {
+                setTimeout(() => this.nextTurn(), 800);
+            }
+        }, 600);
     }
 
     canAnyMove() {
-        let pIndex = this.currentPlayer;
-        if (this.teamUpMode && this.tokens[pIndex].every(t => t.finished)) {
-            pIndex = (pIndex + 2) % 4;
-        }
-        return this.tokens[pIndex].some(t => this.rollQueue.some(r => this.canTokenMove(t, r)));
+        const pIndex = this.currentPlayer;
+        const playerTokens = this.tokens[pIndex];
+        return playerTokens.some(token => 
+            this.rollQueue.some(roll => this.canTokenMove(token, roll))
+        );
     }
 
     canTokenMove(token, roll) {
@@ -944,16 +918,29 @@ export class LudoGame {
 
     handleTokenClick(x, y) {
         if (this.gameState !== "move") return;
-        let pIndex = this.currentPlayer;
-        if (this.teamUpMode && this.tokens[pIndex].every(t => t.finished)) {
-            pIndex = (pIndex + 2) % 4;
-        }
+        
+        const pIndex = this.currentPlayer;
+        const playerTokens = this.tokens[pIndex];
 
-        for (const t of this.tokens[pIndex]) {
-            if (Math.hypot(x - t.px, y - t.py) < 24) {
-                const valid = this.rollQueue.filter(r => this.canTokenMove(t, r));
-                if (valid.length > 1) this.moveSelection.show(t, [...new Set(valid)]);
-                else if (valid.length === 1) this.performTokenMove(t, valid[0]);
+        for (const t of playerTokens) {
+            const dx = x - (t.px + t.offset.x);
+            const dy = y - (t.py + t.offset.y);
+            if (Math.sqrt(dx * dx + dy * dy) < 24) {
+                const validRolls = this.rollQueue.filter(r => this.canTokenMove(t, r));
+                
+                if (validRolls.length === 0) continue;
+                
+                if (validRolls.length > 1) {
+                    const uniqueRolls = [...new Set(validRolls)];
+                    const [sx, sy] = this.boardToScreen(t.px + t.offset.x, t.py + t.offset.y);
+                    this.moveSelection.show(t, uniqueRolls);
+                } else {
+                    this.moveSelection.hide();
+                    if (this.network) {
+                        this.network.moveToken(t.index, validRolls[0]);
+                    }
+                    this.performTokenMove(t, validRolls[0]);
+                }
                 break;
             }
         }
@@ -962,58 +949,103 @@ export class LudoGame {
     performTokenMove(token, roll) {
         this.rollQueue.splice(this.rollQueue.indexOf(roll), 1);
         this.audio.playMove();
+        this.moveSelection.hide();
 
         const startSteps = token.steps;
-        let endSteps = token.inHome ? 1 : startSteps + roll;
 
         if (token.inHome) {
             token.inHome = false;
             token.steps = 1;
-            this.finishMove(token, 0, 1);
+            this.moveTokenSequentially(token, 0, 1);
+            setTimeout(() => this.postMoveLogic(token), 200);
             return;
         }
 
-        // Check if token crosses home entry junction
         const effectiveLapEnd = 51 + 52 * (token.lapCount || 0);
-        let stopAtJunction = false, junctionStep = -1;
+        const endSteps = startSteps + roll;
 
-        for (let s = startSteps + 1; s <= endSteps; s++) {
-            if (s === effectiveLapEnd) {
-                stopAtJunction = true;
-                junctionStep = s;
-                break;
-            }
-        }
+        // FIX: Junction — token puri tarah lap end tak pahunche tab hi choice dikhao
+        if (startSteps < effectiveLapEnd && endSteps >= effectiveLapEnd) {
+            this.moveTokenSequentially(token, startSteps, effectiveLapEnd);
+            token.steps = effectiveLapEnd;
 
-        if (stopAtJunction) {
-            this.moveTokenSequentially(token, startSteps, junctionStep);
-            token.steps = junctionStep;
+            const stepsRemaining = endSteps - effectiveLapEnd;
+
             setTimeout(() => {
-                const homeCoord = this.getCellPixel(HOME_STRETCHES[token.player][0][0], HOME_STRETCHES[token.player][0][1]);
-                const nextLapIdx = (junctionStep + PLAYER_START_INDICES[token.player]) % 52;
-                const lapCoord = this.getCellPixel(MAIN_PATH[nextLapIdx][0], MAIN_PATH[nextLapIdx][1]);
-                this.junctionArrows.show(token, homeCoord, lapCoord);
-                token.decisionPending = true;
-                this.pendingMove = { rollRemaining: endSteps - junctionStep };
-            }, junctionStep * 120 + 80);
+                this.showJunctionUI(token, stepsRemaining);
+            }, (effectiveLapEnd - startSteps) * 120 + 150);
         } else {
             this.finishMove(token, startSteps, endSteps);
         }
     }
 
-    performJunctionMove(token, choice) {
-        const rem = this.pendingMove.rollRemaining;
-        const from = token.steps;
+    // FIX: Junction UI — screen-space coordinates use karo (rotation ke baad)
+    showJunctionUI(token, stepsRemaining) {
+        token.decisionPending = true;
+        this.pendingMove = { token, stepsRemaining };
+        this.gameState = 'junction';
 
-        if (choice === 'home') {
-            token.steps = from + rem;
-            this.moveTokenSequentially(token, from, token.steps);
-        } else {
+        // FIX: Token ki current px/py use karo (already rotated screen coords)
+        // JunctionArrows ab UI layer pe draw hoti hai, isliye screen coords chahiye
+
+        // Home stretch first cell — screen coords nikalo via rotation transform
+        const homeCell = HOME_STRETCHES[token.player][0];
+        const [hbx, hby] = this.getCellPixel(homeCell[0], homeCell[1]);
+        const homeScreenPt = this.boardToScreen(hbx, hby);
+
+        // Lap continue — main path pe next cell
+        const nextLapIndex = (token.steps + PLAYER_START_INDICES[token.player]) % 52;
+        const lapCell = MAIN_PATH[nextLapIndex];
+        const [lbx, lby] = this.getCellPixel(lapCell[0], lapCell[1]);
+        const lapScreenPt = this.boardToScreen(lbx, lby);
+
+        // Token screen position
+        const tokenScreenPt = this.boardToScreen(token.px, token.py);
+
+        this.junctionArrows.show(
+            { px: tokenScreenPt[0], py: tokenScreenPt[1] },
+            homeScreenPt,
+            lapScreenPt,
+            stepsRemaining
+        );
+    }
+
+    // FIX: Convert board coordinates to screen coordinates (applying rotation)
+    boardToScreen(bx, by) {
+        const cx = BOARD_X + BOARD_SIZE / 2;
+        const cy = BOARD_Y + BOARD_SIZE / 2;
+        const angle = PLAYER_ROTATIONS[this.clientPlayer] || 0;
+        const dx = bx - cx;
+        const dy = by - cy;
+        const sx = cx + dx * Math.cos(angle) - dy * Math.sin(angle);
+        const sy = cy + dx * Math.sin(angle) + dy * Math.cos(angle);
+        return [sx, sy];
+    }
+
+    resolveJunction(choice) {
+        if (!this.pendingMove) return;
+        const { token, stepsRemaining } = this.pendingMove;
+
+        token.decisionPending = false;
+        this.junctionArrows.hide();
+
+        const fromSteps = token.steps;
+
+        if (choice === 'lap') {
+            // FIX: lapCount pehle badhao, PHIR moveTokenSequentially call karo
             token.lapCount = (token.lapCount || 0) + 1;
-            token.steps = from + rem;
-            this.moveTokenSequentially(token, from, token.steps);
+            token.steps = fromSteps + stepsRemaining;
+            this.moveTokenSequentially(token, fromSteps, token.steps);
+        } else {
+            // home stretch
+            token.steps = fromSteps + stepsRemaining;
+            this.moveTokenSequentially(token, fromSteps, token.steps);
         }
-        setTimeout(() => this.postMoveLogic(token), rem * 120 + 80);
+
+        this.pendingMove = null;
+        this.gameState = 'move';
+
+        setTimeout(() => this.postMoveLogic(token), stepsRemaining * 120 + 100);
     }
 
     finishMove(token, from, to) {
@@ -1023,6 +1055,7 @@ export class LudoGame {
     }
 
     moveTokenSequentially(token, from, to) {
+        // FIX: effectiveLapEnd token ki CURRENT lapCount se calculate karo
         const effectiveLapEnd = 51 + 52 * (token.lapCount || 0);
         for (let s = from + 1; s <= to; s++) {
             let coord;
@@ -1032,7 +1065,7 @@ export class LudoGame {
                 coord = this.getCellPixel(c, r);
             } else {
                 const homeStep = s - effectiveLapEnd;
-                const hIdx = Math.min(5, homeStep);
+                const hIdx = Math.min(5, homeStep - 1); // FIX: 0-indexed (homeStep 1 = index 0)
                 const [c, r] = HOME_STRETCHES[token.player][hIdx];
                 coord = this.getCellPixel(c, r);
             }
@@ -1042,43 +1075,97 @@ export class LudoGame {
 
     postMoveLogic(token) {
         const effectiveLapEnd = 51 + 52 * (token.lapCount || 0);
-        if (token.steps === effectiveLapEnd + 6) {
+        
+        // FIX: Finished check
+        if (token.steps >= effectiveLapEnd + 6) {
             token.finished = true;
+            token.steps = effectiveLapEnd + 6; // clamp
             this.audio.playWin();
             this.spawnParticles(token.px, token.py, COLORS.GOLD, 40);
+            
+            // FIX: Winner check karo
+            const allFinished = this.tokens[token.player].every(t => t.finished);
+            if (allFinished) {
+                this.winner = token.player;
+                this.gameState = 'end';
+                return;
+            }
+        } else {
+            // FIX: Sirf tab collision check karo jab token finished nahi hua
+            this.checkCollisions(token);
         }
-        this.checkCollisions(token);
+        
         this.updateTokenStacking();
         if (this.rollQueue.length === 0 || !this.canAnyMove()) this.nextTurn();
     }
 
     checkCollisions(movedToken) {
         const effectiveLapEnd = 51 + 52 * (movedToken.lapCount || 0);
-        if (movedToken.steps > effectiveLapEnd) return; // No kills in home stretch
-        const movedIdx = (movedToken.steps - 1 + PLAYER_START_INDICES[movedToken.player]) % 52;
-        if (SAFE_INDICES.includes(movedIdx)) return; // Safe cell
+        if (movedToken.steps > effectiveLapEnd) return; // Home stretch mein safe
 
-        let killed = 0;
+        const movedIdx = (movedToken.steps - 1 + PLAYER_START_INDICES[movedToken.player]) % 52;
+        if (SAFE_INDICES.includes(movedIdx)) return;
+
+        // Saare enemy tokens jo same cell pe hain
+        const enemiesOnCell = [];
+
         this.tokens.forEach((pt, p) => {
             if (p === movedToken.player) return;
+
             pt.forEach(t => {
-                const tEffectiveLapEnd = 51 + 52 * (t.lapCount || 0);
-                if (!t.inHome && !t.finished && t.steps >= 1 && t.steps <= tEffectiveLapEnd) {
-                    const tIdx = (t.steps - 1 + PLAYER_START_INDICES[t.player]) % 52;
-                    if (tIdx === movedIdx) {
-                        t.inHome = true; t.steps = 0; t.lapCount = 0;
-                        const [hx, hy] = this.getCellPixel(HOME_POSITIONS[t.player][t.index][0], HOME_POSITIONS[t.player][t.index][1]);
-                        t.px = hx; t.py = hy;
-                        killed++;
-                    }
+                if (t.inHome || t.finished) return;
+                const tLapEnd = 51 + 52 * (t.lapCount || 0);
+                if (t.steps < 1 || t.steps > tLapEnd) return;
+                const tIdx = (t.steps - 1 + PLAYER_START_INDICES[t.player]) % 52;
+                if (tIdx === movedIdx) {
+                    enemiesOnCell.push(t);
                 }
             });
         });
 
-        if (killed > 0) {
+        if (enemiesOnCell.length === 0) return;
+
+        // Group by player
+        const byPlayer = {};
+        enemiesOnCell.forEach(t => {
+            if (!byPlayer[t.player]) byPlayer[t.player] = [];
+            byPlayer[t.player].push(t);
+        });
+
+        let toKill = [];
+
+        // FIX: 2+ same player tokens = DONO kill (aane wala token nahi rukta)
+        Object.values(byPlayer).forEach(group => {
+            // Chahe 1 ho ya 2+, sab kill
+            toKill.push(...group);
+        });
+
+        // Execute kills
+        toKill.forEach(t => {
+            this.sendTokenHome(t);
+            this.spawnParticles(t.px, t.py, COLORS.RED, 25);
+        });
+
+        if (toKill.length > 0) {
             this.audio.playKill();
-            this.spawnParticles(movedToken.px, movedToken.py, COLORS.RED, 30);
+            const msg = toKill.length >= 2
+                ? `${PLAYER_NAMES[movedToken.player]} ne ${toKill.length} tokens ek saath kill kiya! 💥`
+                : `${PLAYER_NAMES[movedToken.player]} ne kill kiya!`;
+            this.chat.addMessage('Game', msg, COLORS.GOLD);
         }
+    }
+
+    // FIX: sendTokenHome — px/py bhi immediately update karo
+    sendTokenHome(token) {
+        token.inHome = true;
+        token.steps = 0;
+        token.lapCount = 0;
+        const homePos = HOME_POSITIONS[token.player][token.index];
+        const [hx, hy] = this.getCellPixel(homePos[0], homePos[1]);
+        token.px = hx;
+        token.py = hy;
+        token.moveQueue = []; // koi pending animation nahi
+        token.offset = { x: 0, y: 0 };
     }
 
     updateTokenStacking() {
@@ -1087,7 +1174,7 @@ export class LudoGame {
             if (t.inHome || t.finished) { t.offset = {x:0,y:0}; return; }
             const effectiveLapEnd = 51 + 52 * (t.lapCount || 0);
             const key = t.steps > effectiveLapEnd
-                ? `H${t.player}-${t.steps - effectiveLapEnd + 51}`
+                ? `H${t.player}-${t.steps - effectiveLapEnd}`
                 : `M${(t.steps - 1 + PLAYER_START_INDICES[t.player]) % 52}`;
             if (!map.has(key)) map.set(key, []);
             map.get(key).push(t);
@@ -1103,13 +1190,22 @@ export class LudoGame {
 
     nextTurn() {
         this.rollQueue = [];
-        // Spatial order: BL(Red=2) → TL(Green=0) → TR(Yellow=1) → BR(Blue=3)
-        const order = [2, 0, 1, 3].filter(p => p < this.playerCount);
+        this.pendingMove = null;
+        this.junctionArrows.hide();
+        
+        this.tokens[this.currentPlayer].forEach(t => t.decisionPending = false);
+
+        let order;
+        if (this.playerCount === 2) order = [0, 2];
+        else if (this.playerCount === 3) order = [0, 1, 2];
+        else order = [0, 1, 2, 3];
+
         const ci = order.indexOf(this.currentPlayer);
         this.currentPlayer = order[(ci + 1) % order.length];
+        
         this.gameState = "roll";
-        this.diceRolled = false;
-        this.avatars.forEach((a, i) => a.active = i === this.currentPlayer);
+
+        this.avatars.forEach((a, i) => a.active = (i === this.currentPlayer));
     }
 
     // ─── WINNER SCREEN ───────────────────────────────────────────────
@@ -1139,33 +1235,24 @@ export class LudoGame {
     // ─── NETWORK SYNC METHODS ────────────────────────────────────────
 
     updateLobbyPlayers(players) {
-        const list = document.getElementById('playersList');
-        if (list) {
-            list.innerHTML = '';
-            players.forEach(p => {
-                const li = document.createElement('li');
-                li.style.color = p.online ? '#FFF' : '#888';
-                li.innerText = `${p.name} (${PLAYER_NAMES[p.color].split(' ')[0]} Color) ${p.online ? '🟢' : '⚪'}`;
-                list.appendChild(li);
-                
-                // Update local names if possible
-                PLAYER_NAMES[p.color] = p.name;
-                if (this.avatars[p.color]) {
-                    this.avatars[p.color].name = p.name;
-                    this.avatars[p.color].initials = p.name.substring(0, 2).toUpperCase();
-                }
-            });
-        }
+        players.forEach(p => {
+            PLAYER_NAMES[p.color] = p.name;
+            if (this.avatars[p.color]) {
+                this.avatars[p.color].name = p.name;
+                this.avatars[p.color].initials = p.name.substring(0, 2).toUpperCase();
+                this.avatars[p.color].botEnabled = !!p.botEnabled;
+            }
+        });
     }
 
     startGameFromServer(state) {
-        document.getElementById('lobbyUI').style.display = 'none';
         this.syncState(state);
     }
 
     syncState(state) {
         this.gameState = state.gameState;
         this.currentPlayer = state.currentPlayer;
+        this.playerCount = state.playerCount || this.playerCount;
         this.rollQueue = [...state.rollQueue];
         if (state.winner !== null && state.winner !== undefined) {
              this.winner = state.winner;
@@ -1180,16 +1267,13 @@ export class LudoGame {
                 tv.finished = sv.finished;
                 tv.lapCount = sv.lapCount;
                 
-                // Snap position
                 if (tv.inHome) {
                     const [hx, hy] = this.getCellPixel(HOME_POSITIONS[p][i][0], HOME_POSITIONS[p][i][1]);
                     tv.px = hx; tv.py = hy;
                 } else if (tv.finished) {
-                     // Keep them in center
-                     const [cx, cy] = this.getCellPixel(7, 7);
-                     tv.px = cx; tv.py = cy;
+                     const [fcx, fcy] = this.getCellPixel(7, 7);
+                     tv.px = fcx; tv.py = fcy;
                 } else {
-                     // Calculate track position based on steps
                      const effectiveLapEnd = 51 + 52 * (tv.lapCount || 0);
                      if (tv.steps <= effectiveLapEnd) {
                          const idx = (tv.steps - 1 + PLAYER_START_INDICES[p]) % 52;
@@ -1198,7 +1282,7 @@ export class LudoGame {
                          tv.px = nx; tv.py = ny;
                      } else {
                          const homeStep = tv.steps - effectiveLapEnd;
-                         const hIdx = Math.min(5, homeStep);
+                         const hIdx = Math.min(5, homeStep - 1); // FIX: 0-indexed
                          const [c, r] = HOME_STRETCHES[p][hIdx];
                          const [nx, ny] = this.getCellPixel(c, r);
                          tv.px = nx; tv.py = ny;
@@ -1211,29 +1295,49 @@ export class LudoGame {
 
     syncTimer(data) {
         this.currentPlayer = data.player;
-        this.turnEndsAt = data.endsAt;
         this.turnDuration = data.duration;
+        this.turnEndsAt = data.endsAt;
+        if (data.endsAt < Date.now()) {
+            this.turnEndsAt = Date.now() + data.duration;
+        }
     }
 
     playRemoteDiceRoll(val, player) {
         this.currentPlayer = player;
-        this.dice.value = val;
+        
+        // If already rolling, update the final value so the current animation ends correctly
+        // But we should also ensure the rollQueue doesn't get desynced if multiple rolls happen
+        this.dice.value = val; 
+
         if (!this.dice.rolling) {
-            this.dice.roll();
+            this.dice.roll(val);
             this.audio.playDiceRoll();
-        }
+        } 
+        
+        // Use a consistent delay that matches DiceAnimation's rollMax (20 frames ~ 333ms)
+        // or just enough to feel right. 600ms is safe.
+        setTimeout(() => {
+            this.rollQueue.push(val);
+            if (val !== 6) {
+                this.gameState = 'move';
+            }
+        }, 600);
     }
 
-    playRemoteTokenMove(player, index, toSteps, finishedInHome) {
+    playRemoteTokenMove(player, index, toSteps, finishedInHome, lapCount) {
         const token = this.tokens[player][index];
         const fromSteps = token.steps;
         if (finishedInHome) token.inHome = false;
+        
+        if (lapCount !== undefined) {
+            token.lapCount = lapCount;
+        }
         
         token.steps = toSteps;
         this.moveTokenSequentially(token, fromSteps, toSteps);
         this.audio.playMove();
 
-        const delay = (toSteps - fromSteps) * 120 + 80;
+        const delay = Math.abs(toSteps - fromSteps) * 120 + 80;
         setTimeout(() => {
             this.updateTokenStacking();
         }, delay);
@@ -1242,13 +1346,8 @@ export class LudoGame {
     playKills(killedList) {
         killedList.forEach(k => {
             const t = this.tokens[k.player][k.index];
-            t.inHome = true;
-            t.steps = 0;
-            t.lapCount = 0;
-            const [hx, hy] = this.getCellPixel(HOME_POSITIONS[k.player][k.index][0], HOME_POSITIONS[k.player][k.index][1]);
-            
-            // simple visual teleport for kill
-            t.px = hx; t.py = hy;
+            this.sendTokenHome(t);
+            this.spawnParticles(t.px, t.py, COLORS.RED, 20);
         });
         if (killedList.length > 0) {
             this.audio.playKill();
@@ -1267,24 +1366,32 @@ export class LudoGame {
          }
     }
 
+    // FIX: syncJunctionChoice — stepsRemaining bhi pass karo
     syncJunctionChoice(player, tokenIndex, remaining, atStep) {
-        if (this.network && this.network.playerColor !== player) return; // Only show for the active player
+        if (this.network && this.network.playerColor !== player) return;
 
         const token = this.tokens[player][tokenIndex];
-        const homeCoord = this.getCellPixel(HOME_STRETCHES[player][0][0], HOME_STRETCHES[player][0][1]);
-        const nextLapIdx = (atStep + PLAYER_START_INDICES[player]) % 52;
-        const lapCoord = this.getCellPixel(MAIN_PATH[nextLapIdx][0], MAIN_PATH[nextLapIdx][1]);
         
-        this.junctionArrows.show(token, homeCoord, lapCoord);
-        token.decisionPending = true;
-    }
-}
+        const homeCell = HOME_STRETCHES[player][0];
+        const [hbx, hby] = this.getCellPixel(homeCell[0], homeCell[1]);
+        const homeScreenPt = this.boardToScreen(hbx, hby);
 
-// ─── UTILITY ─────────────────────────────────────────────────────────
-function lightenColor(hex, amount) {
-    const num = parseInt(hex.replace('#',''), 16);
-    const r = Math.min(255, (num >> 16) + amount);
-    const g = Math.min(255, ((num >> 8) & 0xFF) + amount);
-    const b = Math.min(255, (num & 0xFF) + amount);
-    return `rgb(${r},${g},${b})`;
+        const nextLapIdx = (atStep + PLAYER_START_INDICES[player]) % 52;
+        const lapCell = MAIN_PATH[nextLapIdx];
+        const [lbx, lby] = this.getCellPixel(lapCell[0], lapCell[1]);
+        const lapScreenPt = this.boardToScreen(lbx, lby);
+
+        const tokenScreenPt = this.boardToScreen(token.px, token.py);
+        
+        // FIX: stepsRemaining pass karo
+        this.junctionArrows.show(
+            { px: tokenScreenPt[0], py: tokenScreenPt[1] },
+            homeScreenPt,
+            lapScreenPt,
+            remaining  // was missing before
+        );
+        token.decisionPending = true;
+        this.pendingMove = { token, stepsRemaining: remaining };
+        this.gameState = 'junction';
+    }
 }
