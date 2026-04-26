@@ -27,7 +27,7 @@ export class LudoRoom {
         this.turnTimer = null;
         this.transitionTimer = null; // New timer for animation delays
         this.turnEndsAt = 0;
-        this.turnDuration = 10000;
+        this.turnDuration = 30000;
     }
 
     joinPlayer(sessionId, name, socketId) {
@@ -36,6 +36,7 @@ export class LudoRoom {
             player.socketId = socketId;
             player.isOnline = true;
             player.name = name;
+            player.botEnabled = false; // Reset bot mode on reconnect
         } else {
             if (this.state.gameState !== 'lobby') return false;
             if (this.players.length >= 4) return false;
@@ -47,7 +48,10 @@ export class LudoRoom {
             let colorIndex = colorMap[this.players.length];
             if (colorIndex === undefined) return false;
 
-            player = { sessionId, name, socketId, isOnline: true, colorIndex, botEnabled: false };
+            player = { 
+                sessionId, name, socketId, isOnline: true, colorIndex, 
+                botEnabled: false, lastActivityAt: Date.now() 
+            };
             this.players.push(player);
         }
         return player;
@@ -120,8 +124,17 @@ export class LudoRoom {
         }
 
         this.turnTimer = setTimeout(() => {
+            const player = this.players.find(p => p.colorIndex === this.state.currentPlayer);
+            if (player && !player.botEnabled && player.isOnline) {
+                const inactiveTime = Date.now() - (player.lastActivityAt || 0);
+                if (inactiveTime < this.turnDuration - 500) {
+                    // Player was active recently, just restart the timer
+                    this.startTurnTimer();
+                    return;
+                }
+            }
+
             if (this.state.gameState === 'junction') {
-                // Auto-choose HOME on timeout
                 const botPlayer = this.players.find(p => p.colorIndex === this.state.currentPlayer);
                 if (botPlayer) this.handleJunctionChoice(botPlayer.sessionId, 'home');
             } else {
@@ -170,6 +183,7 @@ export class LudoRoom {
             player.botEnabled = false;
             this.broadcastRoomUpdate();
         }
+        player.lastActivityAt = Date.now();
 
         clearTimeout(this.transitionTimer);
         if (this.state.gameState !== 'roll') return;
@@ -222,6 +236,7 @@ export class LudoRoom {
             player.botEnabled = false;
             this.broadcastRoomUpdate();
         }
+        player.lastActivityAt = Date.now();
 
         clearTimeout(this.transitionTimer);
         if (this.state.gameState !== 'move') return;
@@ -304,6 +319,7 @@ export class LudoRoom {
             player.botEnabled = false;
             this.broadcastRoomUpdate();
         }
+        player.lastActivityAt = Date.now();
 
         clearTimeout(this.transitionTimer);
         if (this.state.gameState !== 'junction' || !this.state.pendingJunction) return;
@@ -455,6 +471,15 @@ export class LudoRoom {
                 this.startTurnTimer();
             }
             this.broadcastRoomUpdate();
+        }
+    }
+    
+    handlePlayerActivity(sessionId) {
+        const player = this.players.find(p => p.sessionId === sessionId);
+        if (player && player.colorIndex === this.state.currentPlayer) {
+            player.lastActivityAt = Date.now();
+            // Optional: We don't necessarily need to call startTurnTimer() here
+            // since the timer callback itself now checks lastActivityAt
         }
     }
 }

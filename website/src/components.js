@@ -105,6 +105,7 @@ export class Token {
         const r = baseRadius * scale;
 
         ctx.save();
+        ctx.globalAlpha = 1.0;
         ctx.translate(x, y);
 
         // ══════════════════════════════════════════
@@ -166,10 +167,10 @@ export class Token {
             ctx.arc(0, 0, ringR, 0, Math.PI * 2);
             ctx.stroke();
 
-        } else if (!this.isCurrentPlayer) {
-            // DOOSRE PLAYER — dim kar do
-            ctx.globalAlpha = 0.3;
         }
+        
+        // Ensure full opacity for all tokens
+        ctx.globalAlpha = 1.0;
         // ══════════════════════════════════════════
 
         // 1. Drop Shadow for overall piece
@@ -410,6 +411,7 @@ export class MoveSelectionOverlay {
         this.activeToken = null;
         this.options = [];
         this.buttonSize = 40;
+        this.lastAnchor = null;
     }
 
     show(token, options) {
@@ -423,6 +425,10 @@ export class MoveSelectionOverlay {
 
     draw(ctx, sx, sy) {
         if (!this.activeToken) return;
+        this.lastAnchor = { sx, sy };
+        
+        ctx.save();
+        ctx.globalAlpha = 1.0;
 
         const x = sx;
         const y = sy - 60;
@@ -454,15 +460,17 @@ export class MoveSelectionOverlay {
     }
 
     handleClick(mx, my, sx, sy) {
-        if (!this.activeToken) return null;
-        const x = sx;
-        const y = sy - 60;
+        if (!this.activeToken || !this.lastAnchor) return null;
+        
+        const x = this.lastAnchor.sx;
+        const y = this.lastAnchor.sy - 60;
         const w = this.options.length * 50;
 
         for (let i = 0; i < this.options.length; i++) {
             const bx = x - w / 2 + 25 + i * 50;
             const by = y + 20;
-            if (Math.hypot(sx - bx, sy - by) < 18) {
+            // Increased hit area slightly (from 18 to 22) for better touch responsiveness
+            if (Math.hypot(sx - bx, sy - by) < 22) {
                 return this.options[i];
             }
         }
@@ -636,12 +644,13 @@ export class JunctionArrows {
         const w = 90, h = 52;
 
         const [hx, hy] = this.homePos;
-        if (sx >= hx - w/2 && sx <= hx + w/2 && sy >= hy - h/2 && sy <= hy + h/2) {
+        // Increased hit area for junction buttons
+        if (sx >= hx - w/2 - 5 && sx <= hx + w/2 + 5 && sy >= hy - h/2 - 5 && sy <= hy + h/2 + 5) {
             return 'home';
         }
 
         const [lx, ly] = this.lapPos;
-        if (sx >= lx - w/2 && sx <= lx + w/2 && sy >= ly - h/2 && sy <= ly + h/2) {
+        if (sx >= lx - w/2 - 5 && sx <= lx + w/2 + 5 && sy >= ly - h/2 - 5 && sy <= ly + h/2 + 5) {
             return 'lap';
         }
 

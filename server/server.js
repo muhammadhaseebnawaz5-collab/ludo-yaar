@@ -82,6 +82,7 @@ io.on('connection', (socket) => {
                 socketId: p.socketId
             })) 
         });
+        console.log(`Room created: ${roomId} by ${socket.id}`);
     });
 
     // Joins an existing room
@@ -109,6 +110,7 @@ io.on('connection', (socket) => {
                 socketId: p.socketId
             })) 
         });
+        console.log(`Socket ${socket.id} joined room ${roomId}`);
     });
 
     // Start Game
@@ -152,12 +154,22 @@ io.on('connection', (socket) => {
     });
 
     socket.on('chat-message', ({ roomId, message, color }) => {
-        io.to(roomId).emit('chat-message', { message, color });
+        if (!roomId) roomId = socket.roomId;
+        if (roomId) {
+            io.to(roomId).emit('chat-message', { message, color });
+        } else {
+            console.warn(`Chat message from ${socket.id} ignored: no roomId`);
+        }
     });
 
     socket.on('toggle-bot', ({ roomId, sessionId, enabled }) => {
         const room = rooms.get(roomId);
         if (room) room.handleToggleBot(sessionId, enabled);
+    });
+
+    socket.on('player-activity', ({ roomId, sessionId }) => {
+        const room = rooms.get(roomId);
+        if (room) room.handlePlayerActivity(sessionId);
     });
 
     socket.on('disconnect', () => {

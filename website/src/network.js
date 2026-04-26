@@ -11,11 +11,11 @@ export class NetworkManager {
         this.playerColor = null;
 
         this.peers       = {};
-        this.socketIds   = {}; // sessionId -> socketId
+        this.dataChannels = {}; // sessionId -> RTCDataChannel
+        this.socketIds   = {}; // color -> socketId
         this.localStream = null;
         this.isMicOn     = false;
 
-        /** Callback set by main.js for incoming friend invites */
         this.onFriendInvite = null;
 
         this.setupSocketEvents();
@@ -29,14 +29,12 @@ export class NetworkManager {
 
     setupSocketEvents() {
         this.socket.on('connect', () => {
-            console.log('Connected to server');
-            // Re-register on reconnect so server knows we're back
+            console.log('WebSocket connected:', this.socket.id);
             const name = localStorage.getItem('ludoLastName') || 'Player';
             this._emitRegister(name);
         });
 
         this.socket.on('room-update', (data) => {
-            // Update socketId mapping for WebRTC
             data.players.forEach(p => {
                 if (p.socketId) this.socketIds[p.color] = p.socketId;
             });
@@ -44,11 +42,8 @@ export class NetworkManager {
         });
 
         this.socket.on('game-started', (state) => {
-            window.debugLog('Game started event received from server');
             if (this.game.gameState === 'lobby' || this.game.gameState === 'setup') {
                 this.game.startGameFromServer(state);
-            } else {
-                window.debugLog(`Ignored game-started: current state is ${this.game.gameState}`, 'warn');
             }
         });
 
@@ -81,29 +76,33 @@ export class NetworkManager {
         });
 
         this.socket.on('chat-message', (data) => {
+            // WebSocket chat fallback
             this.game.chat.addMessage(data.message.sender, data.message.text, data.color);
         });
 
-        // ── Direct invite received ──
         this.socket.on('friend-invite', (data) => {
             if (typeof this.onFriendInvite === 'function') {
                 this.onFriendInvite(data);
             }
         });
 
-        // ── WebRTC Signaling ──
         this.socket.on('voice-signal', async ({ fromSocketId, signal }) => {
             if (!this.peers[fromSocketId]) {
                 this.createPeerConnection(fromSocketId, false);
             }
+            const pc = this.peers[fromSocketId];
             try {
-                await this.peers[fromSocketId].setRemoteDescription(new RTCSessionDescription(signal));
-                if (signal.type === 'offer') {
-                    const answer = await this.peers[fromSocketId].createAnswer();
-                    await this.peers[fromSocketId].setLocalDescription(answer);
-                    this.socket.emit('voice-signal', { roomId: this.roomId, toSocketId: fromSocketId, signal: answer });
+                if (signal.sdp) {
+                    await pc.setRemoteDescription(new RTCSessionDescription(signal));
+                    if (signal.type === 'offer') {
+                        const answer = await pc.createAnswer();
+                        await pc.setLocalDescription(answer);
+                        this.socket.emit('voice-signal', { roomId: this.roomId, toSocketId: fromSocketId, signal: answer });
+                    }
+                } else if (signal.candidate) {
+                    await pc.addIceCandidate(new RTCIceCandidate(signal));
                 }
-            } catch(e) { console.error(e); }
+            } catch(e) { console.error('Signaling error', e); }
         });
 
         this.socket.on('peer-voice-status', ({ sessionId, color, isMicOn }) => {
@@ -111,7 +110,6 @@ export class NetworkManager {
         });
     }
 
-    // ── Register user globally (so they can receive invites) ──
     registerUser(name) {
         localStorage.setItem('ludoLastName', name);
         this._emitRegister(name);
@@ -121,7 +119,6 @@ export class NetworkManager {
         this.socket.emit('register-user', { uuid: this.userUUID, name });
     }
 
-    // ── Create Room ──
     createRoom(name, count, teamUpMode, callback) {
         this.socket.emit('create-room', { name, count, teamUpMode }, (res) => {
             if (res.success) {
@@ -134,7 +131,6 @@ export class NetworkManager {
         });
     }
 
-    // ── Join Room ──
     joinRoom(roomId, name, callback) {
         this.socket.emit('join-room', { roomId, name, sessionId: this.sessionId }, (res) => {
             if (res.success) {
@@ -149,26 +145,22 @@ export class NetworkManager {
         });
     }
 
-    // ── Start Game ──
     startGame() {
         this.socket.emit('start-game', { roomId: this.roomId, sessionId: this.sessionId });
     }
 
-    // ── Check friends online status ──
     checkFriendsStatus(uuids, callback) {
         this.socket.emit('check-friends-status', { uuids }, (statuses) => {
             callback(statuses);
         });
     }
 
-    // ── Invite a friend directly ──
     inviteFriend(targetUUID, targetName, roomId) {
         const senderName  = localStorage.getItem('ludoLastName') || 'Someone';
         const senderColor = this.playerColor ?? 0;
         this.socket.emit('invite-friend', { targetUUID, senderName, senderColor, roomId });
     }
 
-    // ── Game Actions ──
     rollDice() {
         this.socket.emit('roll-dice', { roomId: this.roomId, sessionId: this.sessionId });
     }
@@ -182,6 +174,17 @@ export class NetworkManager {
     }
 
     sendChat(text, senderName, color) {
+        // Try DataChannel first
+        let sentViaDC = false;
+        Object.keys(this.dataChannels).forEach(sid => {
+            const dc = this.dataChannels[sid];
+            if (dc.readyState === 'open') {
+                dc.send(JSON.stringify({ type: 'chat', sender: senderName, text, color }));
+                sentViaDC = true;
+            }
+        });
+
+        // Always send via WebSocket as fallback/broadcast
         this.socket.emit('chat-message', { roomId: this.roomId, message: { sender: senderName, text }, color });
     }
 
@@ -189,21 +192,25 @@ export class NetworkManager {
         this.socket.emit('toggle-bot', { roomId: this.roomId, sessionId: this.sessionId, enabled });
     }
 
-    // ── Voice ──
+    sendActivity() {
+        if (this.roomId && this.sessionId) {
+            this.socket.emit('player-activity', { roomId: this.roomId, sessionId: this.sessionId });
+        }
+    }
+
     async toggleMic() {
         if (!this.localStream) {
             try {
-                this.localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+                this.localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
                 this.isMicOn = true;
                 this.broadcastVoiceStatus();
-                // When turning on mic, initiate connection to all other players
                 Object.values(this.socketIds).forEach(sid => {
                     if (sid !== this.socket.id && !this.peers[sid]) {
                         this.createPeerConnection(sid, true);
                     }
                 });
             } catch(e) {
-                console.error('Mic error', e);
+                console.error('Mic access denied', e);
                 return false;
             }
         } else {
@@ -219,17 +226,52 @@ export class NetworkManager {
     }
 
     createPeerConnection(targetSocketId, isInitiator) {
-        const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+        const pc = new RTCPeerConnection({ 
+            iceServers: [
+                { urls: 'stun:stun.l.google.com:19302' },
+                { urls: 'stun:stun1.l.google.com:19302' },
+                { urls: 'stun:stun2.l.google.com:19302' },
+                { urls: 'stun:stun3.l.google.com:19302' },
+                { urls: 'stun:stun4.l.google.com:19302' },
+                { urls: 'stun:global.stun.twilio.com:3478' }
+                // { urls: 'turn:global.turn.twilio.com:3478', username: 'guest', credential: 'guest' }
+            ] 
+        });
         this.peers[targetSocketId] = pc;
+
+        // Data Channel for Chat
+        if (isInitiator) {
+            const dc = pc.createDataChannel("chat");
+            this.setupDataChannel(targetSocketId, dc);
+        } else {
+            pc.ondatachannel = (event) => {
+                this.setupDataChannel(targetSocketId, event.channel);
+            };
+        }
+
+        pc.onicecandidate = (event) => {
+            if (event.candidate) {
+                this.socket.emit('voice-signal', { roomId: this.roomId, toSocketId: targetSocketId, signal: event.candidate });
+            }
+        };
 
         if (this.localStream) {
             this.localStream.getTracks().forEach(track => pc.addTrack(track, this.localStream));
         }
 
         pc.ontrack = (event) => {
+            console.log('Received remote audio track from', targetSocketId);
             const audio = new Audio();
             audio.srcObject = event.streams[0];
-            audio.play().catch(() => {});
+            audio.play().catch(e => console.warn('Audio play failed', e));
+        };
+
+        pc.oniceconnectionstatechange = () => {
+            console.log(`ICE Connection State [${targetSocketId}]: ${pc.iceConnectionState}`);
+        };
+
+        pc.onconnectionstatechange = () => {
+            console.log(`Connection State [${targetSocketId}]: ${pc.connectionState}`);
         };
 
         if (isInitiator) {
@@ -238,5 +280,17 @@ export class NetworkManager {
                   this.socket.emit('voice-signal', { roomId: this.roomId, toSocketId: targetSocketId, signal: pc.localDescription });
               });
         }
+    }
+
+    setupDataChannel(sid, dc) {
+        this.dataChannels[sid] = dc;
+        dc.onopen = () => console.log(`DataChannel [${sid}] is OPEN`);
+        dc.onmessage = (e) => {
+            const data = JSON.parse(e.data);
+            if (data.type === 'chat') {
+                this.game.chat.addMessage(data.sender, data.text, data.color);
+            }
+        };
+        dc.onclose = () => console.log(`DataChannel [${sid}] is CLOSED`);
     }
 }

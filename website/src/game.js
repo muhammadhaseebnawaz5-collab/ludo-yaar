@@ -104,7 +104,7 @@ export class LudoGame {
         this.pendingMove = null;
         this.network = null;
         this.turnEndsAt = 0;
-        this.turnDuration = 10000;
+        this.turnDuration = 30000;
     }
 
     getCellPixel(gx, gy) {

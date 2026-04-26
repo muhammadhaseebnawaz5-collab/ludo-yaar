@@ -555,36 +555,40 @@ function getPos(e) {
 function handleInput(e) {
     e.preventDefault();
     const [sx, sy] = getPos(e);
-
-    // --- COORDINATE UN-ROTATION FOR BOARD CLICKS ---
-    const bcx = BOARD_X + BOARD_SIZE / 2;
-    const bcy = BOARD_Y + BOARD_SIZE / 2;
-    const angle = PLAYER_ROTATIONS[game.clientPlayer] || 0;
     
-    // Rotate point (sx, sy) by -angle around (bcx, bcy)
-    const dx = sx - bcx;
-    const dy = sy - bcy;
-    const lx = bcx + dx * Math.cos(-angle) - dy * Math.sin(-angle);
-    const ly = bcy + dx * Math.sin(-angle) + dy * Math.cos(-angle);
-    // ----------------------------------------------
+    // Heartbeat to reset server-side auto-turn timer
+    if (network) network.sendActivity();
 
-    // MoveSelection draws in UI layer (screen coords) → use sx,sy
-    const moveOption = game.moveSelection.handleClick(lx, ly, sx, sy);
-    if (moveOption !== null) {
-        const token = game.moveSelection.activeToken;
-        game.moveSelection.hide();
-        network.moveToken(token.index, moveOption);
-        return;
+    // 1. JUNCTION CHOICE (Priority #1)
+    if (game.gameState === 'junction') {
+        const junctionChoice = game.junctionArrows.handleClick(sx, sy);
+        if (junctionChoice !== null) {
+            if (game.network && game.network.selectJunction) {
+                game.network.selectJunction(junctionChoice);
+            }
+            game.resolveJunction(junctionChoice);
+            return; // STOP: Choice made
+        }
     }
 
-    // JunctionArrows draws in UI layer (screen coords) → use sx,sy
-    const junctionChoice = game.junctionArrows.handleClick(sx, sy);
-    if (junctionChoice !== null) {
-        if (game.network && game.network.selectJunction) {
-            game.network.selectJunction(junctionChoice);
+    // 2. MOVE SELECTION (Priority #2 - multiple rolls)
+    if (game.moveSelection.activeToken) {
+        // COORDINATE UN-ROTATION FOR BOARD CLICKS (needed for lx, ly if handleClick used them, but it uses sx, sy)
+        const bcx = BOARD_X + BOARD_SIZE / 2;
+        const bcy = BOARD_Y + BOARD_SIZE / 2;
+        const angle = PLAYER_ROTATIONS[game.clientPlayer] || 0;
+        const dx = sx - bcx;
+        const dy = sy - bcy;
+        const lx = bcx + dx * Math.cos(-angle) - dy * Math.sin(-angle);
+        const ly = bcy + dx * Math.sin(-angle) + dy * Math.cos(-angle);
+
+        const moveOption = game.moveSelection.handleClick(lx, ly, sx, sy);
+        if (moveOption !== null) {
+            const token = game.moveSelection.activeToken;
+            game.moveSelection.hide();
+            network.moveToken(token.index, moveOption);
+            return; // STOP: Move selected
         }
-        game.resolveJunction(junctionChoice);
-        return;
     }
 
     // Emoji button
