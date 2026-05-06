@@ -183,6 +183,7 @@ export class LudoRoom {
 
   broadcastRoomUpdate() {
     this.broadcast("room-update", {
+      playerCount: this.playerCount,
       players: this.players.map((p) => ({
         name: p.name,
         color: p.colorIndex,

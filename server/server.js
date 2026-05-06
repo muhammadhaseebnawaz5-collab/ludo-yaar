@@ -86,8 +86,12 @@ io.on("connection", (socket) => {
       roomId,
       sessionId,
       playerColor: player.colorIndex,
+      isHost: true,
+      playerCount: room.playerCount,
     });
+
     io.to(roomId).emit("room-update", {
+      playerCount: room.playerCount,
       players: room.players.map((p) => ({
         name: p.name,
         color: p.colorIndex,
@@ -118,13 +122,20 @@ io.on("connection", (socket) => {
     socket.roomId = roomId;
     socket.sessionId = sessionId;
 
+    // Check if this player is the host (first player in the list)
+    const isHost = room.players[0].sessionId === sessionId;
+
     callback({
       success: true,
       sessionId,
       playerColor: player.colorIndex,
+      isHost,
+      playerCount: room.playerCount,
       state: room.state,
     });
+
     io.to(roomId).emit("room-update", {
+      playerCount: room.playerCount,
       players: room.players.map((p) => ({
         name: p.name,
         color: p.colorIndex,
@@ -153,6 +164,7 @@ io.on("connection", (socket) => {
         // Broadcast updated player list
         if (room.players.length > 0) {
           io.to(roomId).emit("room-update", {
+            playerCount: room.playerCount,
             players: room.players.map((p) => ({
               name: p.name,
               color: p.colorIndex,
@@ -295,6 +307,7 @@ io.on("connection", (socket) => {
       if (player) {
         room.disconnectPlayer(socket.id);
         io.to(roomId).emit("room-update", {
+          playerCount: room.playerCount,
           players: room.players.map((p) => ({
             name: p.name,
             color: p.colorIndex,

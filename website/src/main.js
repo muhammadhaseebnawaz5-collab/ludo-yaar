@@ -31,8 +31,9 @@ game.network = network;
 // Set up auto-rejoin callback
 network.onAutoRejoin = function (res) {
   const name = localStorage.getItem("ludoLastName") || "Player";
-  isHost = false;
-  enterWaitingRoom(res.roomId, name, false);
+  isHost = !!res.isHost;
+  if (res.playerCount) selectedCount = res.playerCount;
+  enterWaitingRoom(res.roomId, name, isHost);
   if (res.state && res.state.gameState !== "lobby") {
     // Reconnected to an active game
     game.startGameFromServer(res.state);
@@ -220,6 +221,7 @@ btnStart.addEventListener("click", () => {
     if (res.success) {
       window.debugLog(`Room created: ${res.roomId}`);
       isHost = true;
+      if (res.playerCount) selectedCount = res.playerCount;
       enterWaitingRoom(res.roomId, name, true);
     } else {
       window.debugLog(`Room creation failed: ${res.error}`, "error");
@@ -290,8 +292,9 @@ function attemptJoin() {
     btnConfirmJoin.textContent = "Join Table";
     if (res.success) {
       hidePopup(joinPopup);
-      isHost = false;
-      enterWaitingRoom(code, name, false);
+      isHost = !!res.isHost;
+      if (res.playerCount) selectedCount = res.playerCount;
+      enterWaitingRoom(code, name, isHost);
       if (res.state && res.state.gameState !== "lobby") {
         // Reconnected to an active game → skip waiting room
         game.startGameFromServer(res.state);
@@ -332,7 +335,10 @@ function enterWaitingRoom(roomCode, myName, host) {
 }
 
 /** Called by network when room-update fires */
-game.updateLobbyPlayers = function (players) {
+game.updateLobbyPlayers = function (data) {
+  const players = data.players || [];
+  if (data.playerCount) selectedCount = data.playerCount;
+
   game.activePlayerColors = players
     .map((p) => p.color)
     .filter((color) => Number.isInteger(color))
@@ -359,11 +365,6 @@ game.updateLobbyPlayers = function (players) {
       filled: true,
     }));
 
-    // Pad with empty slots
-    for (let i = slots.length; i < totalNeeded; i++) {
-      slots.push({ empty: true });
-    }
-
     updateWaitSlots(slots);
   }
 
@@ -385,8 +386,14 @@ game.updateLobbyPlayers = function (players) {
 };
 
 function updateWaitSlots(slots) {
+  // Ensure we always show the full number of slots based on selectedCount
+  const paddedSlots = [...slots];
+  while (paddedSlots.length < selectedCount) {
+    paddedSlots.push({ empty: true });
+  }
+
   slotsContainer.innerHTML = "";
-  slots.forEach((slot) => {
+  paddedSlots.forEach((slot) => {
     const div = document.createElement("div");
     div.className = "player-slot";
 

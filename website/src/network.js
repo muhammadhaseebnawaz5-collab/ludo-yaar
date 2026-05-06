@@ -57,7 +57,7 @@ export class NetworkManager {
         }
       });
       this.applyRemoteAudioMuteStates();
-      this.game.updateLobbyPlayers(data.players);
+      this.game.updateLobbyPlayers(data);
     });
 
     this.socket.on("game-started", (state) => {
