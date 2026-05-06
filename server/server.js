@@ -136,34 +136,78 @@ io.on("connection", (socket) => {
     console.log(`Socket ${socket.id} joined room ${roomId}`);
   });
 
+  // Leave Room
+  socket.on("leave-room", ({ roomId, sessionId }) => {
+    const room = rooms.get(roomId);
+    if (room) {
+      // Remove the player from the room
+      const playerIndex = room.players.findIndex(
+        (p) => p.sessionId === sessionId,
+      );
+      if (playerIndex !== -1) {
+        room.players.splice(playerIndex, 1);
+        console.log(
+          `Player ${sessionId} left room ${roomId}. Remaining: ${room.players.length}`,
+        );
+
+        // Broadcast updated player list
+        if (room.players.length > 0) {
+          io.to(roomId).emit("room-update", {
+            players: room.players.map((p) => ({
+              name: p.name,
+              color: p.colorIndex,
+              online: p.isOnline,
+              botEnabled: p.botEnabled,
+              socketId: p.socketId,
+            })),
+          });
+        } else {
+          // Delete empty room
+          rooms.delete(roomId);
+          console.log(`Room ${roomId} deleted (empty)`);
+        }
+      }
+    }
+
+    // Leave socket.io room
+    socket.leave(roomId);
+    socket.roomId = null;
+    socket.sessionId = null;
+  });
+
   // Start Game
-  socket.on("start-game", ({ roomId, sessionId }) => {
+  socket.on("start-game", (data) => {
+    // Use socket.roomId as primary, fallback to passed roomId
+    const roomId = socket.roomId || data?.roomId;
+    const sessionId = socket.sessionId || data?.sessionId;
     const room = rooms.get(roomId);
 
     console.log("[start-game]", {
       roomId,
       sessionId,
+      "socket.roomId": socket.roomId,
+      "socket.sessionId": socket.sessionId,
       gameState: room?.state?.gameState,
       players: room?.players?.length,
       maxPlayers: room?.playerCount,
       hostSession: room?.players?.[0]?.sessionId,
     });
 
-    if (!room) return;
+    if (!room) {
+      console.log("[start-game] FAILED: room not found", { roomId });
+      return;
+    }
 
     // Only host can start
-    if (room.players[0]?.sessionId !== sessionId) return;
-
-    // Dynamic player count start guard (selected count)
-    if (room.players.length < room.playerCount) {
-      console.log("[start-game] blocked: not enough players", {
-        required: room.playerCount,
-        got: room.players.length,
-        roomId,
+    if (room.players[0]?.sessionId !== sessionId) {
+      console.log("[start-game] FAILED: not host", {
+        expectedSessionId: room.players[0]?.sessionId,
+        actualSessionId: sessionId,
       });
       return;
     }
 
+    // Start game (bots will be added inside startGame)
     room.startGame();
   });
 

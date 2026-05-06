@@ -200,8 +200,14 @@ export class NetworkManager {
   }
 
   leaveRoom() {
+    // Notify server to leave the current room
+    if (this.roomId) {
+      this.socket.emit("leave-room", {
+        roomId: this.roomId,
+        sessionId: this.sessionId,
+      });
+    }
     this.clearStoredSession();
-    // Additional cleanup if needed
   }
 
   createRoom(name, count, teamUpMode, callback) {
