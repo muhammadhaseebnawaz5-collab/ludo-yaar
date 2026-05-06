@@ -892,13 +892,16 @@ function handleInput(e) {
     }
   }
 
-  if (sx >= 106 && sx <= 142 && sy >= SCREEN_H - 52 && sy <= SCREEN_H - 16) {
+  // Mic button - enlarged hitbox for mobile (44x44 minimum)
+  if (sx >= 88 && sx <= 160 && sy >= SCREEN_H - 60 && sy <= SCREEN_H - 8) {
     network.toggleMic().then((isOn) => {
       game.localMicMuted = !isOn;
     });
     return;
   }
-  if (sx >= 156 && sx <= 192 && sy >= SCREEN_H - 52 && sy <= SCREEN_H - 16) {
+
+  // Speaker button - enlarged hitbox for mobile (44x44 minimum)
+  if (sx >= 138 && sx <= 210 && sy >= SCREEN_H - 60 && sy <= SCREEN_H - 8) {
     game.setGlobalSpeakerEnabled(!game.speakerPanelVisible);
     return;
   }
@@ -950,6 +953,56 @@ canvas.addEventListener(
     // If chat input is active, don't let the canvas handler swallow the tap that should focus the input.
     if (game?.chat?.active && isEventInsideChatUI(e)) return;
     handleInput(e);
+  },
+  { passive: false },
+);
+
+// Add explicit touch event listeners for better mobile support
+canvas.addEventListener(
+  "touchstart",
+  (e) => {
+    // Ensure touches are handled like pointer events
+    if (game?.chat?.active && isEventInsideChatUI(e)) return;
+    // Prevent default only on canvas touches (not on inputs)
+    if (e.target === canvas) {
+      e.preventDefault();
+    }
+    handleInput(e);
+  },
+  { passive: false },
+);
+
+canvas.addEventListener(
+  "touchmove",
+  (e) => {
+    // Prevent default scrolling on canvas touches
+    if (e.target === canvas) {
+      e.preventDefault();
+    }
+  },
+  { passive: false },
+);
+
+canvas.addEventListener(
+  "touchend",
+  (e) => {
+    if (e.target === canvas) {
+      e.preventDefault();
+    }
+  },
+  { passive: false },
+);
+
+// Prevent double-tap zoom on mobile
+let lastTouchEnd = 0;
+canvas.addEventListener(
+  "touchend",
+  (e) => {
+    const now = Date.now();
+    if (now - lastTouchEnd <= 300 && e.touches.length === 0) {
+      e.preventDefault();
+    }
+    lastTouchEnd = now;
   },
   { passive: false },
 );
