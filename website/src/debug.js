@@ -14,6 +14,7 @@
     logContainer.style.zIndex = '10000';
     logContainer.style.pointerEvents = 'none';
     logContainer.style.border = '1px solid #0f0';
+    logContainer.style.display = 'none';
     logContainer.id = 'debug-log-container';
     document.body.appendChild(logContainer);
 

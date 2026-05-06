@@ -239,7 +239,8 @@ export class LudoRoom {
         player.lastActivityAt = Date.now();
 
         clearTimeout(this.transitionTimer);
-        if (this.state.gameState !== 'move') return;
+        // ALLOW MOVE IF IN 'move' OR IF 'roll' BUT WE HAVE DICE READY (like after a 6)
+        if (this.state.gameState !== 'move' && (this.state.gameState !== 'roll' || this.state.rollQueue.length === 0)) return;
 
         const token = this.state.tokens[player.colorIndex][tokenIndex];
         if (!token) return;
