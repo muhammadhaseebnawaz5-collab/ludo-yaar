@@ -1,486 +1,631 @@
-import { MAIN_PATH, HOME_STRETCHES, PLAYER_START_INDICES, SAFE_INDICES, HOME_POSITIONS } from '../website/src/constants.js';
+import { randomInt } from "crypto";
+import {
+  MAIN_PATH,
+  HOME_STRETCHES,
+  PLAYER_START_INDICES,
+  SAFE_INDICES,
+  HOME_POSITIONS,
+} from "../website/src/constants.js";
 
 export class LudoRoom {
-    constructor(roomId, options, broadcastCallback) {
-        this.roomId = roomId;
-        this.playerCount = options.playerCount || 4;
-        this.teamUpMode = options.teamUpMode || false;
-        this.broadcast = broadcastCallback;
-        
-        this.players = [];
-        
-        this.state = {
-            tokens: Array.from({length: 4}, (_, p) => 
-                Array.from({length: 4}, (_, i) => ({
-                    player: p, index: i, steps: 0, 
-                    finished: false, inHome: true, lapCount: 0
-                }))
-            ),
-            currentPlayer: 0,
-            rollQueue: [],
-            gameState: 'lobby',
-            pendingJunction: null,
-            winner: null,
-            playerCount: this.playerCount
-        };
-        
-        this.turnTimer = null;
-        this.transitionTimer = null; // New timer for animation delays
-        this.turnEndsAt = 0;
-        this.turnDuration = 30000;
+  constructor(roomId, options, broadcastCallback) {
+    this.roomId = roomId;
+    this.playerCount = options.playerCount || 4;
+    this.teamUpMode = options.teamUpMode || false;
+    this.broadcast = broadcastCallback;
+
+    this.players = [];
+
+    this.state = {
+      tokens: Array.from({ length: 4 }, (_, p) =>
+        Array.from({ length: 4 }, (_, i) => ({
+          player: p,
+          index: i,
+          steps: 0,
+          finished: false,
+          inHome: true,
+          lapCount: 0,
+        })),
+      ),
+      currentPlayer: 0,
+      rollQueue: [],
+      gameState: "lobby",
+      pendingJunction: null,
+      winner: null,
+      playerCount: this.playerCount,
+      rollSeq: 0,
+      lastRoll: null,
+    };
+
+    this.turnTimer = null;
+    this.transitionTimer = null; // New timer for animation delays
+    this.turnEndsAt = 0;
+    this.turnDuration = 30000;
+    this.rollStats = Array.from({ length: 4 }, () => ({
+      rolls: 0,
+      sixes: 0,
+      currentSixStreak: 0,
+      currentSixDrought: 0,
+      maxSixDrought: 0,
+    }));
+    this.rollHistory = [];
+  }
+
+  rollDie() {
+    return randomInt(1, 7);
+  }
+
+  recordRoll(playerColor, value) {
+    const stats = this.rollStats[playerColor];
+    if (!stats) return;
+
+    stats.rolls += 1;
+    if (value === 6) {
+      stats.sixes += 1;
+      stats.currentSixStreak += 1;
+      stats.currentSixDrought = 0;
+    } else {
+      stats.currentSixStreak = 0;
+      stats.currentSixDrought += 1;
+      stats.maxSixDrought = Math.max(
+        stats.maxSixDrought,
+        stats.currentSixDrought,
+      );
     }
 
-    joinPlayer(sessionId, name, socketId) {
-        let player = this.players.find(p => p.sessionId === sessionId);
-        if (player) {
-            player.socketId = socketId;
-            player.isOnline = true;
-            player.name = name;
-            player.botEnabled = false; // Reset bot mode on reconnect
-        } else {
-            if (this.state.gameState !== 'lobby') return false;
-            if (this.players.length >= 4) return false;
-            
-            let colorMap = [0, 1, 2, 3];
-            if (this.playerCount === 2) colorMap = [0, 2];
-            else if (this.playerCount === 3) colorMap = [0, 1, 2];
-            
-            let colorIndex = colorMap[this.players.length];
-            if (colorIndex === undefined) return false;
+    this.rollHistory.push({ player: playerColor, value, at: Date.now() });
+    if (this.rollHistory.length > 120) this.rollHistory.shift();
+    this.auditSixDistribution(playerColor);
+  }
 
-            player = { 
-                sessionId, name, socketId, isOnline: true, colorIndex, 
-                botEnabled: false, lastActivityAt: Date.now() 
-            };
-            this.players.push(player);
-        }
-        return player;
+  auditSixDistribution(playerColor) {
+    const stats = this.rollStats[playerColor];
+    if (!stats || stats.rolls < 24) return;
+
+    const sixRate = stats.sixes / stats.rolls;
+    if (sixRate > 0.34 || sixRate < 0.04 || stats.maxSixDrought >= 30) {
+      console.warn("[dice-audit]", {
+        roomId: this.roomId,
+        player: playerColor,
+        rolls: stats.rolls,
+        sixes: stats.sixes,
+        sixRate: Number(sixRate.toFixed(3)),
+        maxSixDrought: stats.maxSixDrought,
+      });
+    }
+  }
+
+  getColorMap() {
+    if (this.playerCount === 2) {
+      const firstColor = this.players[0]?.colorIndex;
+      return firstColor === 1 ? [1, 3] : [0, 2];
+    }
+    if (this.playerCount === 3) return [0, 1, 2];
+    return [0, 1, 2, 3];
+  }
+
+  joinPlayer(sessionId, name, socketId) {
+    let player = this.players.find((p) => p.sessionId === sessionId);
+    let isReconnect = false;
+    if (player) {
+      player.socketId = socketId;
+      player.isOnline = true;
+      player.name = name;
+      player.botEnabled = false; // Reset bot mode on reconnect
+      isReconnect = true;
+    } else {
+      if (this.state.gameState !== "lobby") return false;
+      if (this.players.length >= 4) return false;
+
+      const colorMap = this.getColorMap();
+
+      let colorIndex = colorMap[this.players.length];
+      if (colorIndex === undefined) return false;
+
+      player = {
+        sessionId,
+        name,
+        socketId,
+        isOnline: true,
+        colorIndex,
+        botEnabled: false,
+        lastActivityAt: Date.now(),
+      };
+      this.players.push(player);
     }
 
-    disconnectPlayer(socketId) {
-        const player = this.players.find(p => p.socketId === socketId);
-        if (player) {
-            player.isOnline = false;
-            player.socketId = null;
-            player.botEnabled = true;
-            this.broadcast('state-update', this.state);
-            this.broadcastRoomUpdate();
-        }
+    // Notify other players about reconnection
+    if (isReconnect && this.state.gameState !== "lobby") {
+      this.broadcast("player-reconnected", {
+        playerColor: player.colorIndex,
+        playerName: player.name,
+      });
     }
 
-    startGame() {
-        if (this.state.gameState !== 'lobby') return;
+    return player;
+  }
 
-        let colorMap = [0, 1, 2, 3];
-        if (this.playerCount === 2) colorMap = [0, 2];
-        else if (this.playerCount === 3) colorMap = [0, 1, 2];
+  disconnectPlayer(socketId) {
+    const player = this.players.find((p) => p.socketId === socketId);
+    if (player) {
+      player.isOnline = false;
+      player.socketId = null;
+      player.botEnabled = true;
+      this.broadcast("state-update", this.state);
+      this.broadcastRoomUpdate();
+    }
+  }
 
-        colorMap.forEach(color => {
-            if (!this.players.find(p => p.colorIndex === color)) {
-                this.players.push({
-                    sessionId: 'bot-' + color,
-                    name: 'Computer ' + (color + 1),
-                    socketId: null,
-                    isOnline: false,
-                    colorIndex: color,
-                    botEnabled: true
-                });
-            }
+  startGame() {
+    if (this.state.gameState !== "lobby") return;
+
+    const colorMap = this.getColorMap();
+
+    colorMap.forEach((color) => {
+      if (!this.players.find((p) => p.colorIndex === color)) {
+        this.players.push({
+          sessionId: "bot-" + color,
+          name: "Computer " + (color + 1),
+          socketId: null,
+          isOnline: false,
+          colorIndex: color,
+          botEnabled: true,
         });
+      }
+    });
 
-        this.state.currentPlayer = this.players[0].colorIndex;
-        this.state.gameState = 'roll';
-        this.broadcast('game-started', this.state);
-        this.broadcastRoomUpdate();
-        this.startTurnTimer();
+    this.state.currentPlayer = this.players[0].colorIndex;
+    this.state.gameState = "roll";
+    this.broadcast("game-started", this.state);
+    this.broadcastRoomUpdate();
+    this.startTurnTimer();
+  }
+
+  broadcastRoomUpdate() {
+    this.broadcast("room-update", {
+      players: this.players.map((p) => ({
+        name: p.name,
+        color: p.colorIndex,
+        online: p.isOnline,
+        botEnabled: p.botEnabled,
+        socketId: p.socketId,
+      })),
+    });
+  }
+
+  startTurnTimer() {
+    clearTimeout(this.turnTimer);
+    this.turnEndsAt = Date.now() + this.turnDuration;
+    this.broadcast("timer-sync", {
+      endsAt: this.turnEndsAt,
+      duration: this.turnDuration,
+      player: this.state.currentPlayer,
+    });
+
+    const currentPlayerObj = this.players.find(
+      (p) => p.colorIndex === this.state.currentPlayer,
+    );
+    let timeToWait = this.turnDuration;
+
+    if (!currentPlayerObj || currentPlayerObj.botEnabled) {
+      timeToWait = 1500;
     }
 
-    broadcastRoomUpdate() {
-        this.broadcast('room-update', { 
-            players: this.players.map(p => ({
-                name: p.name, 
-                color: p.colorIndex, 
-                online: p.isOnline, 
-                botEnabled: p.botEnabled,
-                socketId: p.socketId
-            })) 
-        });
-    }
-
-    startTurnTimer() {
-        clearTimeout(this.turnTimer);
-        this.turnEndsAt = Date.now() + this.turnDuration;
-        this.broadcast('timer-sync', { 
-            endsAt: this.turnEndsAt, 
-            duration: this.turnDuration, 
-            player: this.state.currentPlayer 
-        });
-
-        const currentPlayerObj = this.players.find(p => p.colorIndex === this.state.currentPlayer);
-        let timeToWait = this.turnDuration;
-        
-        if (!currentPlayerObj || currentPlayerObj.botEnabled) {
-            timeToWait = 1500;
+    this.turnTimer = setTimeout(() => {
+      const player = this.players.find(
+        (p) => p.colorIndex === this.state.currentPlayer,
+      );
+      if (player && !player.botEnabled && player.isOnline) {
+        const inactiveTime = Date.now() - (player.lastActivityAt || 0);
+        if (inactiveTime < this.turnDuration - 500) {
+          // Player was active recently, just restart the timer
+          this.startTurnTimer();
+          return;
         }
+      }
 
-        this.turnTimer = setTimeout(() => {
-            const player = this.players.find(p => p.colorIndex === this.state.currentPlayer);
-            if (player && !player.botEnabled && player.isOnline) {
-                const inactiveTime = Date.now() - (player.lastActivityAt || 0);
-                if (inactiveTime < this.turnDuration - 500) {
-                    // Player was active recently, just restart the timer
-                    this.startTurnTimer();
-                    return;
-                }
-            }
+      if (this.state.gameState === "junction") {
+        const botPlayer = this.players.find(
+          (p) => p.colorIndex === this.state.currentPlayer,
+        );
+        if (botPlayer) this.handleJunctionChoice(botPlayer.sessionId, "home");
+      } else {
+        this.autoPlayTurn();
+      }
+    }, timeToWait);
+  }
 
-            if (this.state.gameState === 'junction') {
-                const botPlayer = this.players.find(p => p.colorIndex === this.state.currentPlayer);
-                if (botPlayer) this.handleJunctionChoice(botPlayer.sessionId, 'home');
-            } else {
-                this.autoPlayTurn();
-            }
-        }, timeToWait);
+  nextTurn() {
+    this.state.rollQueue = [];
+    this.state.pendingJunction = null;
+
+    const order = this.getColorMap();
+
+    const ci = order.indexOf(this.state.currentPlayer);
+    this.state.currentPlayer = order[(ci + 1) % order.length];
+    this.state.gameState = "roll";
+
+    this.broadcast("state-update", this.state);
+    this.startTurnTimer();
+  }
+
+  canAnyMove() {
+    const pIndex = this.state.currentPlayer;
+    const pts = this.state.tokens[pIndex];
+    return pts.some((t) =>
+      this.state.rollQueue.some((r) => this.canTokenMove(t, r)),
+    );
+  }
+
+  canTokenMove(token, roll) {
+    if (token.finished) return false;
+    if (token.inHome) return roll === 6;
+    const effectiveLapEnd = 51 + 52 * (token.lapCount || 0);
+    const maxSteps = effectiveLapEnd + 6;
+    if (token.steps + roll > maxSteps) return false;
+    return true;
+  }
+
+  handleRollDice(sessionId) {
+    const player = this.players.find((p) => p.sessionId === sessionId);
+    if (!player || player.colorIndex !== this.state.currentPlayer) {
+      return { success: false, error: "not-your-turn" };
     }
 
-    nextTurn() {
+    if (player.botEnabled) {
+      player.botEnabled = false;
+      this.broadcastRoomUpdate();
+    }
+    player.lastActivityAt = Date.now();
+
+    clearTimeout(this.transitionTimer);
+    if (this.state.gameState !== "roll") {
+      return { success: false, error: "not-roll-state" };
+    }
+    return this.executeRoll();
+  }
+
+  executeRoll() {
+    clearTimeout(this.turnTimer);
+    clearTimeout(this.transitionTimer);
+    const val = this.rollDie();
+    this.state.rollSeq += 1;
+    const rollId = this.state.rollSeq;
+    this.state.lastRoll = {
+      id: rollId,
+      value: val,
+      byPlayer: this.state.currentPlayer,
+      at: Date.now(),
+    };
+    this.recordRoll(this.state.currentPlayer, val);
+
+    this.broadcast("dice-rolled", {
+      id: rollId,
+      value: val,
+      byPlayer: this.state.currentPlayer,
+    });
+
+    this.transitionTimer = setTimeout(() => {
+      this.state.rollQueue.push(val);
+      const sixCount = this.state.rollQueue.filter((v) => v === 6).length;
+
+      if (sixCount >= 3) {
+        // FIX: Teen 6 = rollQueue clear karke turn end
         this.state.rollQueue = [];
-        this.state.pendingJunction = null;
-        
-        let order;
-        if (this.playerCount === 2) order = [0, 2];
-        else if (this.playerCount === 3) order = [0, 1, 2];
-        else order = [0, 1, 2, 3];
-        
-        const ci = order.indexOf(this.state.currentPlayer);
-        this.state.currentPlayer = order[(ci + 1) % order.length];
+        this.nextTurn();
+        return;
+      }
+
+      if (val === 6) {
+        // FIX: 6 aaya = "roll" state rehti hai, move bhi ho sakta hai (6 queue mein hai)
         this.state.gameState = "roll";
-        
-        this.broadcast('state-update', this.state);
+        this.broadcast("state-update", this.state);
         this.startTurnTimer();
+        return;
+      }
+
+      // Normal roll = move phase
+      this.state.gameState = "move";
+
+      if (!this.canAnyMove()) {
+        setTimeout(() => this.nextTurn(), 800);
+      } else {
+        this.broadcast("state-update", this.state);
+        this.startTurnTimer();
+      }
+    }, 650); // Slightly more than 600ms to be safe
+
+    return { success: true, rollId, value: val };
+  }
+
+  handleMoveToken(sessionId, tokenIndex, rollValue) {
+    const player = this.players.find((p) => p.sessionId === sessionId);
+    if (!player || player.colorIndex !== this.state.currentPlayer) return;
+
+    if (player.botEnabled) {
+      player.botEnabled = false;
+      this.broadcastRoomUpdate();
+    }
+    player.lastActivityAt = Date.now();
+
+    clearTimeout(this.transitionTimer);
+    // ALLOW MOVE IF IN 'move' OR IF 'roll' BUT WE HAVE DICE READY (like after a 6)
+    if (
+      this.state.gameState !== "move" &&
+      (this.state.gameState !== "roll" || this.state.rollQueue.length === 0)
+    )
+      return;
+
+    const token = this.state.tokens[player.colorIndex][tokenIndex];
+    if (!token) return;
+
+    if (
+      !this.state.rollQueue.includes(rollValue) ||
+      !this.canTokenMove(token, rollValue)
+    )
+      return;
+
+    this.executeMove(token, rollValue);
+  }
+
+  executeMove(token, rollValue) {
+    clearTimeout(this.turnTimer);
+
+    // Consume roll
+    const rIndex = this.state.rollQueue.indexOf(rollValue);
+    if (rIndex > -1) this.state.rollQueue.splice(rIndex, 1);
+
+    const startSteps = token.steps;
+
+    if (token.inHome) {
+      token.inHome = false;
+      token.steps = 1;
+      this.broadcast("token-moved", {
+        player: token.player,
+        index: token.index,
+        toSteps: 1,
+        finishedInHome: true,
+      });
+      this.transitionTimer = setTimeout(
+        () => this.finalizeMove(token, 0, 1),
+        250,
+      );
+      return;
     }
 
-    canAnyMove() {
-        const pIndex = this.state.currentPlayer;
-        const pts = this.state.tokens[pIndex];
-        return pts.some(t => this.state.rollQueue.some(r => this.canTokenMove(t, r)));
+    const effectiveLapEnd = 51 + 52 * (token.lapCount || 0);
+    const endSteps = startSteps + rollValue;
+
+    // FIX: Junction detection — sirf tab jab token actually cross karta hai
+    if (startSteps < effectiveLapEnd && endSteps >= effectiveLapEnd) {
+      const stepsRemaining = endSteps - effectiveLapEnd;
+
+      token.steps = effectiveLapEnd;
+      this.state.gameState = "junction";
+      this.state.pendingJunction = {
+        player: token.player,
+        tokenIndex: token.index,
+        remainingSteps: stepsRemaining,
+      };
+
+      // Client ko junction tak move animation dikhao
+      this.broadcast("token-moved", {
+        player: token.player,
+        index: token.index,
+        toSteps: effectiveLapEnd,
+        finishedInHome: false,
+      });
+
+      // FIX: atStep bhi bhejo taake client path calculate kar sake
+      this.broadcast("waiting-for-junction", {
+        player: token.player,
+        tokenIndex: token.index,
+        remaining: stepsRemaining,
+        atStep: effectiveLapEnd,
+      });
+
+      this.startTurnTimer();
+    } else {
+      token.steps = endSteps;
+      // First broadcast movement, then finalize
+      this.broadcast("token-moved", {
+        player: token.player,
+        index: token.index,
+        toSteps: endSteps,
+        finishedInHome: false,
+      });
+      const delay = (endSteps - startSteps) * 125 + 150;
+      this.transitionTimer = setTimeout(
+        () => this.finalizeMove(token, startSteps, endSteps),
+        delay,
+      );
+    }
+  }
+
+  handleJunctionChoice(sessionId, choice) {
+    const player = this.players.find((p) => p.sessionId === sessionId);
+    if (!player || player.colorIndex !== this.state.currentPlayer) return;
+
+    if (player.botEnabled) {
+      player.botEnabled = false;
+      this.broadcastRoomUpdate();
+    }
+    player.lastActivityAt = Date.now();
+
+    clearTimeout(this.transitionTimer);
+    if (this.state.gameState !== "junction" || !this.state.pendingJunction)
+      return;
+
+    const {
+      player: pIdx,
+      tokenIndex,
+      remainingSteps,
+    } = this.state.pendingJunction;
+    const token = this.state.tokens[pIdx][tokenIndex];
+    const prevSteps = token.steps;
+
+    clearTimeout(this.turnTimer);
+
+    if (choice === "lap") {
+      // FIX: lapCount pehle badhao
+      token.lapCount = (token.lapCount || 0) + 1;
     }
 
-    canTokenMove(token, roll) {
-        if (token.finished) return false;
-        if (token.inHome) return roll === 6;
-        const effectiveLapEnd = 51 + 52 * (token.lapCount || 0);
-        const maxSteps = effectiveLapEnd + 6;
-        if (token.steps + roll > maxSteps) return false;
-        return true;
+    token.steps += remainingSteps;
+    this.state.pendingJunction = null;
+    this.state.gameState = "move";
+
+    // Broadcast the remaining movement
+    this.broadcast("token-moved", {
+      player: token.player,
+      index: token.index,
+      toSteps: token.steps,
+      finishedInHome: false,
+      lapCount: token.lapCount,
+    });
+
+    const delay = remainingSteps * 125 + 150;
+    this.transitionTimer = setTimeout(
+      () => this.finalizeMove(token, prevSteps, token.steps),
+      delay,
+    );
+  }
+
+  finalizeMove(token, startSteps, endSteps) {
+    // FIX: effectiveLapEnd token ki CURRENT lapCount se (jo update ho chuka hai)
+    const effectiveLapEnd = 51 + 52 * (token.lapCount || 0);
+
+    if (token.steps >= effectiveLapEnd + 6) {
+      token.finished = true;
+      token.steps = effectiveLapEnd + 6; // clamp
+    } else {
+      this.checkCollisions(token);
     }
 
-    handleRollDice(sessionId) {
-        const player = this.players.find(p => p.sessionId === sessionId);
-        if (!player || player.colorIndex !== this.state.currentPlayer) return;
-
-        if (player.botEnabled) {
-            player.botEnabled = false;
-            this.broadcastRoomUpdate();
-        }
-        player.lastActivityAt = Date.now();
-
-        clearTimeout(this.transitionTimer);
-        if (this.state.gameState !== 'roll') return;
-        this.executeRoll();
+    // Check win condition
+    if (this.state.tokens[token.player].every((t) => t.finished)) {
+      this.state.winner = token.player;
+      this.state.gameState = "end";
+      this.broadcast("game-over", { winner: token.player });
+      return;
     }
 
-    executeRoll() {
-        clearTimeout(this.turnTimer);
-        clearTimeout(this.transitionTimer);
-        const val = Math.floor(Math.random() * 6) + 1;
-        
-        this.broadcast('dice-rolled', { value: val, byPlayer: this.state.currentPlayer });
+    if (this.state.rollQueue.length === 0 || !this.canAnyMove()) {
+      this.nextTurn();
+    } else {
+      this.broadcast("state-update", this.state);
+      this.startTurnTimer();
+    }
+  }
 
-        this.transitionTimer = setTimeout(() => {
-            this.state.rollQueue.push(val);
-            const sixCount = this.state.rollQueue.filter(v => v === 6).length;
-            
-            if (sixCount >= 3) {
-                // FIX: Teen 6 = rollQueue clear karke turn end
-                this.state.rollQueue = [];
-                this.nextTurn();
-                return;
-            }
-            
-            if (val === 6) {
-                // FIX: 6 aaya = "roll" state rehti hai, move bhi ho sakta hai (6 queue mein hai)
-                this.state.gameState = "roll";
-                this.broadcast('state-update', this.state);
-                this.startTurnTimer();
-                return;
-            }
+  checkCollisions(movedToken) {
+    const effectiveLapEnd = 51 + 52 * (movedToken.lapCount || 0);
+    if (movedToken.steps > effectiveLapEnd) return; // Home stretch — safe
 
-            // Normal roll = move phase
-            this.state.gameState = "move";
-            
-            if (!this.canAnyMove()) {
-                setTimeout(() => this.nextTurn(), 800);
-            } else {
-                this.broadcast('state-update', this.state);
-                this.startTurnTimer();
-            }
-        }, 650); // Slightly more than 600ms to be safe
+    const movedIdx =
+      (movedToken.steps - 1 + PLAYER_START_INDICES[movedToken.player]) % 52;
+    if (SAFE_INDICES.includes(movedIdx)) return; // Safe cell
+
+    // Saare enemy tokens jo same board index pe hain
+    let enemiesOnCell = [];
+    for (let p = 0; p < 4; p++) {
+      if (p === movedToken.player) continue;
+
+      for (let i = 0; i < 4; i++) {
+        const t = this.state.tokens[p][i];
+        const tLapEnd = 51 + 52 * (t.lapCount || 0);
+        if (!t.inHome && !t.finished && t.steps >= 1 && t.steps <= tLapEnd) {
+          const tIdx = (t.steps - 1 + PLAYER_START_INDICES[t.player]) % 52;
+          if (tIdx === movedIdx) {
+            enemiesOnCell.push(t);
+          }
+        }
+      }
     }
 
-    handleMoveToken(sessionId, tokenIndex, rollValue) {
-        const player = this.players.find(p => p.sessionId === sessionId);
-        if (!player || player.colorIndex !== this.state.currentPlayer) return;
+    if (enemiesOnCell.length === 0) return;
 
-        if (player.botEnabled) {
-            player.botEnabled = false;
-            this.broadcastRoomUpdate();
-        }
-        player.lastActivityAt = Date.now();
+    // FIX: 1 ya 2+ tokens — sab kill karo (2 tokens = both go home)
+    const killed = [];
+    enemiesOnCell.forEach((t) => {
+      t.inHome = true;
+      t.steps = 0;
+      t.lapCount = 0;
+      killed.push({ player: t.player, index: t.index });
+    });
 
-        clearTimeout(this.transitionTimer);
-        // ALLOW MOVE IF IN 'move' OR IF 'roll' BUT WE HAVE DICE READY (like after a 6)
-        if (this.state.gameState !== 'move' && (this.state.gameState !== 'roll' || this.state.rollQueue.length === 0)) return;
+    if (killed.length > 0) {
+      this.broadcast("tokens-killed", {
+        movedToken: { player: movedToken.player, index: movedToken.index },
+        killed,
+      });
+    }
+  }
 
-        const token = this.state.tokens[player.colorIndex][tokenIndex];
-        if (!token) return;
-        
-        if (!this.state.rollQueue.includes(rollValue) || !this.canTokenMove(token, rollValue)) return;
-
-        this.executeMove(token, rollValue);
+  autoPlayTurn() {
+    const player = this.players.find(
+      (p) => p.colorIndex === this.state.currentPlayer,
+    );
+    if (player && !player.botEnabled) {
+      player.botEnabled = true;
+      this.broadcastRoomUpdate();
     }
 
-    executeMove(token, rollValue) {
-        clearTimeout(this.turnTimer);
-        
-        // Consume roll
-        const rIndex = this.state.rollQueue.indexOf(rollValue);
-        if (rIndex > -1) this.state.rollQueue.splice(rIndex, 1);
-
-        const startSteps = token.steps;
-
-        if (token.inHome) {
-            token.inHome = false;
-            token.steps = 1;
-            this.broadcast('token-moved', {
-                player: token.player, index: token.index, toSteps: 1,
-                finishedInHome: true
-            });
-            this.transitionTimer = setTimeout(() => this.finalizeMove(token, 0, 1), 250);
-            return;
-        }
-
-        const effectiveLapEnd = 51 + 52 * (token.lapCount || 0);
-        const endSteps = startSteps + rollValue;
-
-        // FIX: Junction detection — sirf tab jab token actually cross karta hai
-        if (startSteps < effectiveLapEnd && endSteps >= effectiveLapEnd) {
-            const stepsRemaining = endSteps - effectiveLapEnd;
-            
-            token.steps = effectiveLapEnd;
-            this.state.gameState = 'junction';
-            this.state.pendingJunction = {
-                player: token.player,
-                tokenIndex: token.index,
-                remainingSteps: stepsRemaining
-            };
-
-            // Client ko junction tak move animation dikhao
-            this.broadcast('token-moved', {
-                player: token.player, index: token.index, toSteps: effectiveLapEnd,
-                finishedInHome: false
-            });
-
-            // FIX: atStep bhi bhejo taake client path calculate kar sake
-            this.broadcast('waiting-for-junction', {
-                player: token.player,
-                tokenIndex: token.index,
-                remaining: stepsRemaining,
-                atStep: effectiveLapEnd
-            });
-
-            this.startTurnTimer();
-        } else {
-            token.steps = endSteps;
-            // First broadcast movement, then finalize
-            this.broadcast('token-moved', {
-                player: token.player, index: token.index, toSteps: endSteps,
-                finishedInHome: false
-            });
-            const delay = (endSteps - startSteps) * 125 + 150;
-            this.transitionTimer = setTimeout(() => this.finalizeMove(token, startSteps, endSteps), delay);
-        }
+    if (this.state.gameState === "roll") {
+      this.executeRoll();
+      return;
     }
 
-    handleJunctionChoice(sessionId, choice) {
-        const player = this.players.find(p => p.sessionId === sessionId);
-        if (!player || player.colorIndex !== this.state.currentPlayer) return;
+    if (this.state.gameState === "move") {
+      // FIX: SIRF current player ke tokens
+      const pIdx = this.state.currentPlayer;
+      const playerTokens = this.state.tokens[pIdx];
+      let possibleMoves = [];
 
-        if (player.botEnabled) {
-            player.botEnabled = false;
-            this.broadcastRoomUpdate();
+      for (const t of playerTokens) {
+        for (const r of this.state.rollQueue) {
+          if (this.canTokenMove(t, r)) {
+            possibleMoves.push({ token: t, roll: r });
+          }
         }
-        player.lastActivityAt = Date.now();
+      }
 
-        clearTimeout(this.transitionTimer);
-        if (this.state.gameState !== 'junction' || !this.state.pendingJunction) return;
-
-        const { player: pIdx, tokenIndex, remainingSteps } = this.state.pendingJunction;
-        const token = this.state.tokens[pIdx][tokenIndex];
-        const prevSteps = token.steps;
-
-        clearTimeout(this.turnTimer);
-
-        if (choice === 'lap') {
-            // FIX: lapCount pehle badhao
-            token.lapCount = (token.lapCount || 0) + 1;
-        }
-        
-        token.steps += remainingSteps;
-        this.state.pendingJunction = null;
-        this.state.gameState = 'move';
-
-        // Broadcast the remaining movement
-        this.broadcast('token-moved', {
-            player: token.player, index: token.index, toSteps: token.steps,
-            finishedInHome: false,
-            lapCount: token.lapCount
-        });
-
-        const delay = remainingSteps * 125 + 150;
-        this.transitionTimer = setTimeout(() => this.finalizeMove(token, prevSteps, token.steps), delay);
+      if (possibleMoves.length > 0) {
+        // Priority: ghar se nikalna > board pe chalana
+        const homeMove = possibleMoves.find((m) => m.token.inHome);
+        const move = homeMove || possibleMoves[randomInt(possibleMoves.length)];
+        this.executeMove(move.token, move.roll);
+      } else {
+        this.nextTurn();
+      }
+      return;
     }
 
-    finalizeMove(token, startSteps, endSteps) {
-        // FIX: effectiveLapEnd token ki CURRENT lapCount se (jo update ho chuka hai)
-        const effectiveLapEnd = 51 + 52 * (token.lapCount || 0);
-        
-        if (token.steps >= effectiveLapEnd + 6) {
-            token.finished = true;
-            token.steps = effectiveLapEnd + 6; // clamp
-        } else {
-            this.checkCollisions(token);
-        }
-
-        // Check win condition
-        if (this.state.tokens[token.player].every(t => t.finished)) {
-            this.state.winner = token.player;
-            this.state.gameState = 'end';
-            this.broadcast('game-over', { winner: token.player });
-            return;
-        }
-
-        if (this.state.rollQueue.length === 0 || !this.canAnyMove()) {
-            this.nextTurn();
-        } else {
-            this.broadcast('state-update', this.state);
-            this.startTurnTimer();
-        }
+    if (this.state.gameState === "junction") {
+      const botPlayer = this.players.find(
+        (p) => p.colorIndex === this.state.currentPlayer,
+      );
+      if (botPlayer) this.handleJunctionChoice(botPlayer.sessionId, "home");
     }
+  }
 
-    checkCollisions(movedToken) {
-        const effectiveLapEnd = 51 + 52 * (movedToken.lapCount || 0);
-        if (movedToken.steps > effectiveLapEnd) return; // Home stretch — safe
-
-        const movedIdx = (movedToken.steps - 1 + PLAYER_START_INDICES[movedToken.player]) % 52;
-        if (SAFE_INDICES.includes(movedIdx)) return; // Safe cell
-
-        // Saare enemy tokens jo same board index pe hain
-        let enemiesOnCell = [];
-        for (let p = 0; p < 4; p++) {
-            if (p === movedToken.player) continue;
-            
-            for (let i = 0; i < 4; i++) {
-                const t = this.state.tokens[p][i];
-                const tLapEnd = 51 + 52 * (t.lapCount || 0);
-                if (!t.inHome && !t.finished && t.steps >= 1 && t.steps <= tLapEnd) {
-                    const tIdx = (t.steps - 1 + PLAYER_START_INDICES[t.player]) % 52;
-                    if (tIdx === movedIdx) {
-                        enemiesOnCell.push(t);
-                    }
-                }
-            }
-        }
-
-        if (enemiesOnCell.length === 0) return;
-
-        // FIX: 1 ya 2+ tokens — sab kill karo (2 tokens = both go home)
-        const killed = [];
-        enemiesOnCell.forEach(t => {
-            t.inHome = true;
-            t.steps = 0;
-            t.lapCount = 0;
-            killed.push({ player: t.player, index: t.index });
-        });
-
-        if (killed.length > 0) {
-            this.broadcast('tokens-killed', { 
-                movedToken: { player: movedToken.player, index: movedToken.index },
-                killed 
-            });
-        }
+  handleToggleBot(sessionId, enabled) {
+    const player = this.players.find((p) => p.sessionId === sessionId);
+    if (player) {
+      player.botEnabled = enabled;
+      if (enabled && this.state.currentPlayer === player.colorIndex) {
+        this.startTurnTimer();
+      }
+      this.broadcastRoomUpdate();
     }
+  }
 
-    autoPlayTurn() {
-        const player = this.players.find(p => p.colorIndex === this.state.currentPlayer);
-        if (player && !player.botEnabled) {
-            player.botEnabled = true;
-            this.broadcastRoomUpdate();
-        }
-
-        if (this.state.gameState === 'roll') {
-            this.executeRoll();
-            return;
-        }
-        
-        if (this.state.gameState === 'move') {
-            // FIX: SIRF current player ke tokens
-            const pIdx = this.state.currentPlayer;
-            const playerTokens = this.state.tokens[pIdx];
-            let possibleMoves = [];
-            
-            for (const t of playerTokens) {
-                for (const r of this.state.rollQueue) {
-                    if (this.canTokenMove(t, r)) {
-                        possibleMoves.push({ token: t, roll: r });
-                    }
-                }
-            }
-
-            if (possibleMoves.length > 0) {
-                // Priority: ghar se nikalna > board pe chalana
-                const homeMove = possibleMoves.find(m => m.token.inHome);
-                const move = homeMove || possibleMoves[Math.floor(Math.random() * possibleMoves.length)];
-                this.executeMove(move.token, move.roll);
-            } else {
-                this.nextTurn();
-            }
-            return;
-        }
-        
-        if (this.state.gameState === 'junction') {
-            const botPlayer = this.players.find(p => p.colorIndex === this.state.currentPlayer);
-            if (botPlayer) this.handleJunctionChoice(botPlayer.sessionId, 'home');
-        }
+  handlePlayerActivity(sessionId) {
+    const player = this.players.find((p) => p.sessionId === sessionId);
+    if (player && player.colorIndex === this.state.currentPlayer) {
+      player.lastActivityAt = Date.now();
+      // Optional: We don't necessarily need to call startTurnTimer() here
+      // since the timer callback itself now checks lastActivityAt
     }
-
-    handleToggleBot(sessionId, enabled) {
-        const player = this.players.find(p => p.sessionId === sessionId);
-        if (player) {
-            player.botEnabled = enabled;
-            if (enabled && this.state.currentPlayer === player.colorIndex) {
-                this.startTurnTimer();
-            }
-            this.broadcastRoomUpdate();
-        }
-    }
-    
-    handlePlayerActivity(sessionId) {
-        const player = this.players.find(p => p.sessionId === sessionId);
-        if (player && player.colorIndex === this.state.currentPlayer) {
-            player.lastActivityAt = Date.now();
-            // Optional: We don't necessarily need to call startTurnTimer() here
-            // since the timer callback itself now checks lastActivityAt
-        }
-    }
+  }
 }

@@ -83,6 +83,7 @@ export class LudoGame {
     this.tokens = [];
     this.gameState = "setup";
     this.playerCount = 4;
+    this.activePlayerColors = [];
     this.teamUpMode = false;
 
     this.audio = new SynthesizedAudioManager();
@@ -92,11 +93,13 @@ export class LudoGame {
     this.winner = null;
     this.dice = new DiceAnimation();
     this.rollQueue = [];
+    this.lastDiceRollId = 0;
+    this.pendingDiceRollTimer = null;
 
     this.chat = new ChatSystem();
     this.chatRect = { x: 8, y: 110, w: 464, h: 510 };
     this.emojiPanel = new EmojiPanel();
-    this.speakerPanelVisible = false;
+    this.speakerPanelVisible = true;
     this.muteStates = Array.from({ length: 4 }, () => [
       false,
       false,
@@ -150,6 +153,29 @@ export class LudoGame {
 
   getVisualIndex(p) {
     return (p - this.clientPlayer + 3 + 4) % 4;
+  }
+
+  getDefaultActivePlayerColors() {
+    if (this.playerCount === 2) {
+      return this.clientPlayer === 1 ||
+        this.clientPlayer === 3 ||
+        this.currentPlayer === 1 ||
+        this.currentPlayer === 3
+        ? [1, 3]
+        : [0, 2];
+    }
+    if (this.playerCount === 3) return [0, 1, 2];
+    return [0, 1, 2, 3];
+  }
+
+  getActivePlayerColors() {
+    return this.activePlayerColors.length
+      ? this.activePlayerColors
+      : this.getDefaultActivePlayerColors();
+  }
+
+  isActivePlayer(playerIndex) {
+    return this.getActivePlayerColors().includes(playerIndex);
   }
 
   // ─── BOARD DRAWING ──────────────────────────────────────────────
@@ -450,7 +476,7 @@ export class LudoGame {
     });
 
     this.tokens.forEach((pt, p) => {
-      if (p < this.playerCount) {
+      if (this.isActivePlayer(p)) {
         pt.forEach((t) => {
           t.update();
           t.isCurrentPlayer = p === this.currentPlayer;
@@ -486,7 +512,7 @@ export class LudoGame {
 
     this.drawBoard(ctx);
     this.tokens.forEach((pt, p) => {
-      if (p < this.playerCount) pt.forEach((t) => t.draw(ctx));
+      if (this.isActivePlayer(p)) pt.forEach((t) => t.draw(ctx));
     });
 
     ctx.restore();
@@ -598,8 +624,7 @@ export class LudoGame {
     ctx.lineTo(SCREEN_W, 108);
     ctx.stroke();
 
-    for (let p = 0; p < 4; p++) {
-      if (p >= this.playerCount) continue;
+    for (const p of this.getActivePlayerColors()) {
       const v = this.getVisualIndex(p);
       if (v === 0 || v === 1) this.drawPlayerCard(ctx, p, v);
     }
@@ -617,8 +642,7 @@ export class LudoGame {
     ctx.lineTo(SCREEN_W, barY);
     ctx.stroke();
 
-    for (let p = 0; p < 4; p++) {
-      if (p >= this.playerCount) continue;
+    for (const p of this.getActivePlayerColors()) {
       const v = this.getVisualIndex(p);
       if (v === 2 || v === 3) this.drawPlayerCard(ctx, p, v);
     }
@@ -632,19 +656,19 @@ export class LudoGame {
 
     buttons.forEach((btn, i) => {
       const bx = 12 + i * 80;
-      const by = SCREEN_H - 34;
+      const by = SCREEN_H - 48;
       ctx.fillStyle = btn.state
         ? "rgba(100,40,160,0.95)"
         : "rgba(45,18,80,0.88)";
       ctx.beginPath();
-      ctx.roundRect(bx, by, 72, 28, 7);
+      ctx.roundRect(bx, by, 72, 40, 8);
       ctx.fill();
       ctx.strokeStyle = "rgba(255,255,255,0.18)";
       ctx.lineWidth = 1;
       ctx.stroke();
 
       const iconX = bx + 36;
-      const iconY = by + 14;
+      const iconY = by + 20;
       ctx.fillStyle = "#fff";
       ctx.strokeStyle = "#fff";
 
@@ -732,7 +756,7 @@ export class LudoGame {
 
     const avR = 30;
     const avX = isRight ? SCREEN_W - 14 - avR : 14 + avR;
-    const avY = isTop ? 54 : SCREEN_H - 108;
+    const avY = isTop ? 78 : SCREEN_H - 108;
 
     this.avatars[i].position = [avX, avY];
     this.avatars[i].setPosition(avX, avY);
@@ -825,51 +849,64 @@ export class LudoGame {
       ctx.textBaseline = "alphabetic";
     }
 
-    // AUTO badge
+    // AUTO/OFFLINE badge
     const badgeW = 72,
       badgeH = 26;
     const badgeX = avX - badgeW / 2;
     const badgeY = isTop ? avY - avR - 38 : avY + avR + 22;
 
-    ctx.fillStyle = this.avatars[i].botEnabled ? "#15803d" : "#5b21b6";
-    ctx.beginPath();
-    ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 8);
-    ctx.fill();
+    const showBadge = this.avatars[i].botEnabled || !this.avatars[i].isOnline;
+    if (showBadge) {
+      const isOffline = !this.avatars[i].isOnline;
+      const badgeText = isOffline ? "OFFLINE" : "AUTO";
 
-    ctx.strokeStyle = this.avatars[i].botEnabled ? "#4ade80" : "#a78bfa";
-    ctx.lineWidth = 1.5;
-    ctx.stroke();
-
-    ctx.fillStyle = "#fff";
-    ctx.font = "bold 11px Arial";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText("AUTO", badgeX + 24, badgeY + 13);
-
-    const tbX = badgeX + 46,
-      tbY = badgeY + 5;
-    ctx.fillStyle = this.avatars[i].botEnabled ? "#166534" : "#3b0764";
-    ctx.beginPath();
-    ctx.roundRect(tbX, tbY, 20, 16, 4);
-    ctx.fill();
-    ctx.strokeStyle = this.avatars[i].botEnabled ? "#4ade80" : "#7c3aed";
-    ctx.lineWidth = 1;
-    ctx.stroke();
-
-    if (this.avatars[i].botEnabled) {
-      ctx.strokeStyle = "#fff";
-      ctx.lineWidth = 2;
-      ctx.lineCap = "round";
-      ctx.lineJoin = "round";
+      ctx.fillStyle = isOffline ? "#dc2626" : "#15803d"; // Red for offline, green for auto
       ctx.beginPath();
-      ctx.moveTo(tbX + 4, tbY + 8);
-      ctx.lineTo(tbX + 8, tbY + 12);
-      ctx.lineTo(tbX + 16, tbY + 4);
+      ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 8);
+      ctx.fill();
+
+      ctx.strokeStyle = isOffline ? "#ef4444" : "#4ade80";
+      ctx.lineWidth = 1.5;
       ctx.stroke();
+
+      ctx.fillStyle = "#fff";
+      ctx.font = "bold 11px Arial";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(badgeText, badgeX + 24, badgeY + 13);
+
+      const tbX = badgeX + 46,
+        tbY = badgeY + 5;
+      ctx.fillStyle = isOffline ? "#991b1b" : "#166534";
+      ctx.beginPath();
+      ctx.roundRect(tbX, tbY, 20, 16, 4);
+      ctx.fill();
+      ctx.strokeStyle = isOffline ? "#ef4444" : "#4ade80";
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      if (!isOffline) {
+        // Only show checkmark for AUTO (bots)
+        ctx.strokeStyle = "#fff";
+        ctx.lineWidth = 2;
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
+        ctx.beginPath();
+        ctx.moveTo(tbX + 4, tbY + 8);
+        ctx.lineTo(tbX + 8, tbY + 12);
+        ctx.lineTo(tbX + 16, tbY + 4);
+        ctx.stroke();
+      }
     }
 
     const secs2 = Math.ceil((this.avatars[i].timerPercent || 0) * 10);
-    if (isActive && secs2 <= 3 && secs2 > 0 && !this.avatars[i].botEnabled) {
+    if (
+      isActive &&
+      secs2 <= 3 &&
+      secs2 > 0 &&
+      !this.avatars[i].botEnabled &&
+      this.avatars[i].isOnline
+    ) {
       const arrowX = avX;
       const arrowY = badgeY - 14 + Math.sin(this.timer * 0.2) * 4;
       ctx.fillStyle = "#22c55e";
@@ -884,15 +921,15 @@ export class LudoGame {
       ctx.shadowBlur = 0;
     }
 
-    if (i !== this.clientPlayer && i < this.playerCount) {
-      const spkX = isRight ? avX - avR - 10 : avX + avR + 10;
-      const spkY = avY + 12;
-      ctx.fillStyle = "rgba(10,5,20,0.8)";
+    if (i !== this.clientPlayer && this.isActivePlayer(i)) {
+      const { x: spkX, y: spkY, r: spkR } = this.getPlayerMuteButtonRect(i);
+      const isMuted = !this.speakerPanelVisible || this.remoteMicMuted[i];
+      ctx.fillStyle = isMuted ? "rgba(90,12,28,0.92)" : "rgba(10,5,20,0.8)";
       ctx.beginPath();
-      ctx.arc(spkX, spkY, 12, 0, Math.PI * 2);
+      ctx.arc(spkX, spkY, spkR, 0, Math.PI * 2);
       ctx.fill();
-      ctx.strokeStyle = "rgba(255,255,255,0.3)";
-      ctx.lineWidth = 1;
+      ctx.strokeStyle = isMuted ? "#FF5A5F" : "rgba(255,255,255,0.3)";
+      ctx.lineWidth = isMuted ? 1.5 : 1;
       ctx.stroke();
       ctx.fillStyle = "#FFF";
       ctx.beginPath();
@@ -905,7 +942,7 @@ export class LudoGame {
       ctx.closePath();
       ctx.fill();
 
-      if (this.remoteMicMuted[i]) {
+      if (isMuted) {
         ctx.strokeStyle = "#FF3333";
         ctx.lineWidth = 2;
         ctx.beginPath();
@@ -919,6 +956,38 @@ export class LudoGame {
         ctx.arc(spkX + 1, spkY, 4, -Math.PI / 4, Math.PI / 4);
         ctx.stroke();
       }
+    }
+  }
+
+  getPlayerMuteButtonRect(playerIndex) {
+    const avatar = this.avatars[playerIndex];
+    const [avX, avY] = avatar.position;
+    const v = this.getVisualIndex(playerIndex);
+    const isRight = v === 1 || v === 2;
+    const avR = 30;
+    return {
+      x: isRight ? avX - avR - 10 : avX + avR + 10,
+      y: avY + 12,
+      r: 12,
+    };
+  }
+
+  toggleRemotePlayerMute(playerIndex) {
+    if (playerIndex === this.clientPlayer) return false;
+    this.remoteMicMuted[playerIndex] = !this.remoteMicMuted[playerIndex];
+    if (this.network && this.network.setPlayerMuted) {
+      this.network.setPlayerMuted(
+        playerIndex,
+        this.remoteMicMuted[playerIndex],
+      );
+    }
+    return this.remoteMicMuted[playerIndex];
+  }
+
+  setGlobalSpeakerEnabled(enabled) {
+    this.speakerPanelVisible = Boolean(enabled);
+    if (this.network && this.network.setGlobalSpeakerEnabled) {
+      this.network.setGlobalSpeakerEnabled(this.speakerPanelVisible);
     }
   }
 
@@ -1513,10 +1582,7 @@ export class LudoGame {
 
     this.tokens[this.currentPlayer].forEach((t) => (t.decisionPending = false));
 
-    let order;
-    if (this.playerCount === 2) order = [0, 2];
-    else if (this.playerCount === 3) order = [0, 1, 2];
-    else order = [0, 1, 2, 3];
+    const order = this.getActivePlayerColors();
 
     const ci = order.indexOf(this.currentPlayer);
     this.currentPlayer = order[(ci + 1) % order.length];
@@ -1565,12 +1631,18 @@ export class LudoGame {
   // ─── NETWORK SYNC METHODS ────────────────────────────────────────
 
   updateLobbyPlayers(players) {
+    this.activePlayerColors = players
+      .map((p) => p.color)
+      .filter((color) => Number.isInteger(color))
+      .sort((a, b) => a - b);
+
     players.forEach((p) => {
       PLAYER_NAMES[p.color] = p.name;
       if (this.avatars[p.color]) {
         this.avatars[p.color].name = p.name;
         this.avatars[p.color].initials = p.name.substring(0, 2).toUpperCase();
         this.avatars[p.color].botEnabled = !!p.botEnabled;
+        this.avatars[p.color].isOnline = !!p.online;
       }
     });
   }
@@ -1583,7 +1655,17 @@ export class LudoGame {
     this.gameState = state.gameState;
     this.currentPlayer = state.currentPlayer;
     this.playerCount = state.playerCount || this.playerCount;
+    if (this.activePlayerColors.length < this.playerCount) {
+      this.activePlayerColors = this.getDefaultActivePlayerColors();
+    }
     this.rollQueue = [...state.rollQueue];
+    if (state.rollSeq !== undefined) {
+      this.lastDiceRollId = Math.max(this.lastDiceRollId, state.rollSeq);
+    }
+    if (this.pendingDiceRollTimer) {
+      clearTimeout(this.pendingDiceRollTimer);
+      this.pendingDiceRollTimer = null;
+    }
     if (state.winner !== null && state.winner !== undefined) {
       this.winner = state.winner;
     }
@@ -1639,7 +1721,10 @@ export class LudoGame {
     }
   }
 
-  playRemoteDiceRoll(val, player) {
+  playRemoteDiceRoll(val, player, rollId = 0) {
+    if (rollId && rollId <= this.lastDiceRollId) return;
+    if (rollId) this.lastDiceRollId = rollId;
+
     this.currentPlayer = player;
 
     // If already rolling, update the final value so the current animation ends correctly
@@ -1651,13 +1736,10 @@ export class LudoGame {
       this.audio.playDiceRoll();
     }
 
-    // Use a consistent delay that matches DiceAnimation's rollMax (20 frames ~ 333ms)
-    // or just enough to feel right. 600ms is safe.
-    setTimeout(() => {
-      this.rollQueue.push(val);
-      // If we have any rolls, we should be able to move
-      this.gameState = "move";
-    }, 600);
+    if (this.pendingDiceRollTimer) clearTimeout(this.pendingDiceRollTimer);
+    this.pendingDiceRollTimer = setTimeout(() => {
+      this.pendingDiceRollTimer = null;
+    }, 700);
   }
 
   playRemoteTokenMove(player, index, toSteps, finishedInHome, lapCount) {
@@ -1694,6 +1776,13 @@ export class LudoGame {
     this.winner = winnerIndex;
     this.gameState = "end";
     this.audio.playWin();
+  }
+
+  showPlayerReconnected(playerColor, playerName) {
+    // Show a notification that the player has reconnected
+    this.showAvatarMessage(playerColor, "Back!");
+    // Could also add a system message or toast notification here
+    console.log(`${playerName} has reconnected to the game`);
   }
 
   updatePeerVoiceStatus(sessionId, color, isMicOn) {
@@ -1737,11 +1826,14 @@ export class LudoGame {
     return /\p{Extended_Pictographic}/u.test(value);
   }
 
-  showAvatarMessage(senderName, text) {
+  showAvatarMessage(senderRef, text) {
     const message = String(text || "").trim();
     if (!message) return;
 
-    const avatarIndex = PLAYER_NAMES.findIndex((n) => n === senderName);
+    const numericSender = Number(senderRef);
+    const avatarIndex = Number.isInteger(numericSender)
+      ? numericSender
+      : PLAYER_NAMES.findIndex((n) => n === senderRef);
     if (avatarIndex < 0 || !this.avatars[avatarIndex]) return;
 
     if (this.isEmojiMessage(message)) {

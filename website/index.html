@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>Ludo Star — Play With Friends</title>
     <meta name="description" content="Play Ludo Star with friends online. Create private tables, invite friends directly, and enjoy real-time multiplayer Ludo.">
     <link rel="stylesheet" href="./style.css">
@@ -13,6 +13,9 @@
 <body>
 <div id="app">
     <div class="game-container">
+        <button id="btnBack" class="app-back-btn" type="button" aria-label="Go back">
+            <span class="app-back-icon" aria-hidden="true"></span>
+        </button>
 
         <!-- ══════════════════════════════════════════
              SCREEN 1: PLAY WITH FRIENDS LOBBY
@@ -153,6 +156,16 @@
 
         <!-- The actual Ludo game canvas (hidden until game starts) -->
         <canvas id="gameCanvas"></canvas>
+
+        <div id="backConfirm" class="back-confirm-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="backConfirmTitle">
+            <div class="back-confirm-card">
+                <div id="backConfirmTitle" class="back-confirm-title">Are you sure you want to go back?</div>
+                <div class="back-confirm-actions">
+                    <button id="btnBackNo" class="back-confirm-btn no" type="button">NO</button>
+                    <button id="btnBackYes" class="back-confirm-btn yes" type="button">YES</button>
+                </div>
+            </div>
+        </div>
     </div>
 </div>
 

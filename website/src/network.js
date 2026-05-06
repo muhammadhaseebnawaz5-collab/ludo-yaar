@@ -5,7 +5,7 @@ export class NetworkManager {
     this.game = gameInstance;
     this.socket = io();
 
-    this.roomId = null;
+    this.roomId = localStorage.getItem("ludoRoomId") || null;
     this.sessionId = localStorage.getItem("ludoSessionId") || null;
     this.userUUID = localStorage.getItem("ludoUserUUID") || this._genUUID();
     this.playerColor = null;
@@ -14,10 +14,14 @@ export class NetworkManager {
     this.dataChannels = {}; // sessionId -> RTCDataChannel
     this.remoteAudioEls = {}; // socketId -> HTMLAudioElement
     this.socketIds = {}; // color -> socketId
+    this.socketIdColors = {}; // socketId -> color
     this.localStream = null;
     this.isMicOn = false;
+    this.globalSpeakerEnabled = true;
+    this.mutedPlayerColors = new Set();
 
     this.onFriendInvite = null;
+    this.onAutoRejoin = null; // callback for auto-rejoin attempts
 
     this.setupSocketEvents();
   }
@@ -36,12 +40,23 @@ export class NetworkManager {
       console.log("WebSocket connected:", this.socket.id);
       const name = localStorage.getItem("ludoLastName") || "Player";
       this._emitRegister(name);
+
+      // Auto-rejoin if we have stored session and room
+      if (this.roomId && this.sessionId) {
+        this.attemptAutoRejoin(name);
+      }
     });
 
     this.socket.on("room-update", (data) => {
+      this.socketIds = {};
+      this.socketIdColors = {};
       data.players.forEach((p) => {
-        if (p.socketId) this.socketIds[p.color] = p.socketId;
+        if (p.socketId) {
+          this.socketIds[p.color] = p.socketId;
+          this.socketIdColors[p.socketId] = p.color;
+        }
       });
+      this.applyRemoteAudioMuteStates();
       this.game.updateLobbyPlayers(data.players);
     });
 
@@ -60,7 +75,7 @@ export class NetworkManager {
     });
 
     this.socket.on("dice-rolled", (data) => {
-      this.game.playRemoteDiceRoll(data.value, data.byPlayer);
+      this.game.playRemoteDiceRoll(data.value, data.byPlayer, data.id);
     });
 
     this.socket.on("token-moved", (data) => {
@@ -88,15 +103,23 @@ export class NetworkManager {
       this.game.showWinner(data.winner);
     });
 
+    this.socket.on("player-reconnected", (data) => {
+      this.game.showPlayerReconnected(data.playerColor, data.playerName);
+    });
+
     this.socket.on("chat-message", (data) => {
-      if (data.message.senderId && data.message.senderId === this.sessionId) return;
+      if (data.message.senderId && data.message.senderId === this.sessionId)
+        return;
       // WebSocket chat fallback
       this.game.chat.addMessage(
         data.message.sender,
         data.message.text,
         data.message.color,
       );
-      this.game.showAvatarMessage(data.message.sender, data.message.text);
+      const senderPlayerId = Number.isInteger(data.message.playerId)
+        ? data.message.playerId
+        : data.message.sender;
+      this.game.showAvatarMessage(senderPlayerId, data.message.text);
     });
 
     this.socket.on("friend-invite", (data) => {
@@ -144,12 +167,49 @@ export class NetworkManager {
     this.socket.emit("register-user", { uuid: this.userUUID, name });
   }
 
+  attemptAutoRejoin(name) {
+    console.log(
+      `Attempting auto-rejoin to room ${this.roomId} with session ${this.sessionId}`,
+    );
+    this.socket.emit(
+      "join-room",
+      { roomId: this.roomId, name, sessionId: this.sessionId },
+      (res) => {
+        if (res.success) {
+          console.log("Auto-rejoin successful");
+          this.playerColor = res.playerColor;
+          // Notify the UI about successful rejoin
+          if (typeof this.onAutoRejoin === "function") {
+            this.onAutoRejoin(res);
+          }
+        } else {
+          console.log("Auto-rejoin failed:", res.error);
+          // Clear stored session data if rejoin fails
+          this.clearStoredSession();
+        }
+      },
+    );
+  }
+
+  clearStoredSession() {
+    localStorage.removeItem("ludoRoomId");
+    localStorage.removeItem("ludoSessionId");
+    this.roomId = null;
+    this.sessionId = null;
+  }
+
+  leaveRoom() {
+    this.clearStoredSession();
+    // Additional cleanup if needed
+  }
+
   createRoom(name, count, teamUpMode, callback) {
     this.socket.emit("create-room", { name, count, teamUpMode }, (res) => {
       if (res.success) {
         this.roomId = res.roomId;
         this.sessionId = res.sessionId;
         this.playerColor = res.playerColor;
+        localStorage.setItem("ludoRoomId", this.roomId);
         localStorage.setItem("ludoSessionId", this.sessionId);
         callback(res);
       }
@@ -165,6 +225,7 @@ export class NetworkManager {
           this.roomId = roomId;
           this.sessionId = res.sessionId;
           this.playerColor = res.playerColor;
+          localStorage.setItem("ludoRoomId", this.roomId);
           localStorage.setItem("ludoSessionId", this.sessionId);
           callback(res);
         } else {
@@ -199,10 +260,18 @@ export class NetworkManager {
   }
 
   rollDice() {
-    this.socket.emit("roll-dice", {
-      roomId: this.roomId,
-      sessionId: this.sessionId,
-    });
+    this.socket.emit(
+      "roll-dice",
+      {
+        roomId: this.roomId,
+        sessionId: this.sessionId,
+      },
+      (res) => {
+        if (!res?.success) {
+          console.warn("Dice roll rejected by server:", res?.error || res);
+        }
+      },
+    );
   }
 
   moveToken(tokenIndex, rollValue) {
@@ -225,23 +294,16 @@ export class NetworkManager {
   sendChat(text, senderName, color) {
     const messageObj = {
       senderId: this.sessionId,
+      playerId: this.playerColor,
+      playerColor: color,
       sender: senderName,
       text,
       timestamp: Date.now(),
       color,
     };
 
-    // Try DataChannel first
-    let sentViaDC = false;
-    Object.keys(this.dataChannels).forEach((sid) => {
-      const dc = this.dataChannels[sid];
-      if (dc.readyState === "open") {
-        dc.send(JSON.stringify({ type: "chat", ...messageObj }));
-        sentViaDC = true;
-      }
-    });
-
-    // Always send via WebSocket as fallback/broadcast
+    // Chat and emoji UI sync must go through the server so every POV receives
+    // the same player id and can render the bubble on its own layout.
     this.socket.emit("chat-message", {
       roomId: this.roomId,
       message: messageObj,
@@ -300,6 +362,53 @@ export class NetworkManager {
       sessionId: this.sessionId,
       isMicOn: this.isMicOn,
     });
+  }
+
+  setGlobalSpeakerEnabled(enabled) {
+    this.globalSpeakerEnabled = Boolean(enabled);
+    this.applyRemoteAudioMuteStates();
+  }
+
+  setPlayerMuted(color, muted) {
+    if (muted) this.mutedPlayerColors.add(color);
+    else this.mutedPlayerColors.delete(color);
+    const socketId = this.socketIds[color];
+    if (socketId) this.applyRemoteAudioMuteState(socketId);
+  }
+
+  isRemoteAudioMutedForColor(color) {
+    return !this.globalSpeakerEnabled || this.mutedPlayerColors.has(color);
+  }
+
+  applyRemoteAudioMuteStates() {
+    Object.keys(this.remoteAudioEls).forEach((socketId) => {
+      this.applyRemoteAudioMuteState(socketId);
+    });
+  }
+
+  applyRemoteAudioMuteState(socketId) {
+    const audio = this.remoteAudioEls[socketId];
+    if (!audio) return;
+
+    const color = this.socketIdColors[socketId];
+    const muted =
+      !this.globalSpeakerEnabled ||
+      (color !== undefined && this.mutedPlayerColors.has(color));
+
+    audio.muted = muted;
+    audio.volume = muted ? 0 : 1;
+
+    if (audio.srcObject) {
+      audio.srcObject.getAudioTracks().forEach((track) => {
+        track.enabled = !muted;
+      });
+    }
+
+    if (muted) {
+      audio.pause();
+    } else {
+      audio.play().catch((e) => console.warn("Audio play failed", e));
+    }
   }
 
   addLocalTracksToPeers() {
@@ -368,7 +477,7 @@ export class NetworkManager {
         this.remoteAudioEls[targetSocketId] = audio;
       }
       audio.srcObject = event.streams[0];
-      audio.play().catch((e) => console.warn("Audio play failed", e));
+      this.applyRemoteAudioMuteState(targetSocketId);
     };
 
     pc.oniceconnectionstatechange = () => {
@@ -404,7 +513,10 @@ export class NetworkManager {
       if (data.type === "chat") {
         if (data.senderId && data.senderId === this.sessionId) return;
         this.game.chat.addMessage(data.sender, data.text, data.color);
-        this.game.showAvatarMessage(data.sender, data.text);
+        const senderPlayerId = Number.isInteger(data.playerId)
+          ? data.playerId
+          : data.sender;
+        this.game.showAvatarMessage(senderPlayerId, data.text);
       }
     };
     dc.onclose = () => console.log(`DataChannel [${sid}] is CLOSED`);

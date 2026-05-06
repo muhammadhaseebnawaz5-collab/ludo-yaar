@@ -516,6 +516,7 @@ export class ProfileAvatar {
     this.micOn = false; // Is their mic enabled?
     this.timerPercent = 0; // 0 to 1 for the green turn timer ring
     this.botEnabled = false;
+    this.isOnline = true; // Is the player online?
     this.displayEmoji = null;
     this.emojiTimer = 0;
     this.emojiAnimationApplied = false;
@@ -566,6 +567,7 @@ export class ProfileAvatar {
     if (this.emojiTimer > 0) {
       this.emojiTimer--;
       if (this.displayEmoji && this.emojiTimer > 0) {
+        this.updatePopupPlacement(this.emojiElement, "emoji");
         this.emojiElement.style.display = "flex";
         this.emojiElement.textContent = this.displayEmoji;
         this.emojiElement.classList.add("show");
@@ -586,6 +588,7 @@ export class ProfileAvatar {
     }
 
     if (this.messageTimer > 0) {
+      this.updatePopupPlacement(this.messageElement, "message");
       this.messageTimer--;
       this.messageElement.style.display = "block";
       this.messageElement.textContent = this.displayMessage;
@@ -624,8 +627,35 @@ export class ProfileAvatar {
     this.position = [x, y];
     this.avatarLayer.style.left = `${x - this.size / 2}px`;
     this.avatarLayer.style.top = `${y - this.size / 2}px`;
-    this.avatarContainer.classList.remove("popup-below");
-    this.avatarContainer.classList.add("popup-above");
+    this.updatePopupPlacement(this.emojiElement, "emoji");
+    this.updatePopupPlacement(this.messageElement, "message");
+  }
+
+  updatePopupPlacement(element, type) {
+    if (!element) return;
+
+    const [x, y] = this.position;
+    const safe = 20;
+    const popupW = type === "emoji" ? 72 : 240;
+    const popupH = type === "emoji" ? 64 : 84;
+    const gap = 12;
+    const minCenterX = safe + popupW / 2;
+    const maxCenterX = SCREEN_W - safe - popupW / 2;
+    const centerX = Math.min(Math.max(x, minCenterX), maxCenterX);
+
+    const belowTop = y + this.size / 2 + gap;
+    const aboveTop = y - this.size / 2 - gap - popupH;
+    let top = y < SCREEN_H / 2 ? belowTop : aboveTop;
+    if (aboveTop < safe) top = belowTop;
+    if (top + popupH > SCREEN_H - safe) top = Math.max(safe, aboveTop);
+    top = Math.min(Math.max(top, safe), SCREEN_H - safe - popupH);
+
+    const layerLeft = x - this.size / 2;
+    const layerTop = y - this.size / 2;
+    element.style.left = `${centerX - layerLeft}px`;
+    element.style.top = `${top - layerTop}px`;
+    element.style.bottom = "auto";
+    element.style.transform = "translateX(-50%)";
   }
 
   draw(ctx) {

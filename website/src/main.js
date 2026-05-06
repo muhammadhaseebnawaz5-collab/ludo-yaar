@@ -13,10 +13,23 @@ import { NetworkManager } from "./network.js";
 
 const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
+const appEl = document.getElementById("app");
+const gameContainer = document.querySelector(".game-container");
 
 let game = new LudoGame();
 let network = new NetworkManager(game);
 game.network = network;
+
+// Set up auto-rejoin callback
+network.onAutoRejoin = function (res) {
+  const name = localStorage.getItem("ludoLastName") || "Player";
+  isHost = false;
+  enterWaitingRoom(res.roomId, name, false);
+  if (res.state && res.state.gameState !== "lobby") {
+    // Reconnected to an active game
+    game.startGameFromServer(res.state);
+  }
+};
 
 // ═══════════════════════════════════════════
 //  ELEMENTS
@@ -54,6 +67,10 @@ const friendSearchInput = document.getElementById("friendSearchInput");
 const btnAcceptInvite = document.getElementById("btnAcceptInvite");
 const btnDeclineInvite = document.getElementById("btnDeclineInvite");
 const ibSenderName = document.getElementById("ibSenderName");
+const btnBack = document.getElementById("btnBack");
+const backConfirm = document.getElementById("backConfirm");
+const btnBackYes = document.getElementById("btnBackYes");
+const btnBackNo = document.getElementById("btnBackNo");
 
 // ═══════════════════════════════════════════
 //  STATE
@@ -116,6 +133,69 @@ function showPopup(el) {
 function hidePopup(el) {
   el.classList.add("hidden");
 }
+
+function isVisible(el) {
+  return el && !el.classList.contains("hidden");
+}
+
+function showBackConfirm() {
+  backConfirm.classList.remove("hidden");
+}
+
+function hideBackConfirm() {
+  backConfirm.classList.add("hidden");
+}
+
+function returnToMainMenu() {
+  hidePopup(joinPopup);
+  hidePopup(friendsPopup);
+  inviteBanner.classList.add("hidden");
+  pendingInvite = null;
+
+  game.chat.visible = false;
+  game.chat.active = false;
+  game.emojiPanel.visible = false;
+  game.gameState = "setup";
+  game.winner = null;
+  game.rollQueue = [];
+  game.moveSelection.hide();
+  game.junctionArrows.hide();
+  game.activePlayerColors = [];
+
+  network.leaveRoom();
+  isHost = false;
+  showScreen(lobbyScreen);
+}
+
+function confirmBackNavigation() {
+  hideBackConfirm();
+
+  if (isVisible(friendsPopup)) {
+    hidePopup(friendsPopup);
+    return;
+  }
+  if (isVisible(joinPopup)) {
+    hidePopup(joinPopup);
+    return;
+  }
+  if (isVisible(inviteBanner)) {
+    inviteBanner.classList.add("hidden");
+    pendingInvite = null;
+    return;
+  }
+  if (isVisible(waitingRoom) || !isVisible(lobbyScreen)) {
+    returnToMainMenu();
+    return;
+  }
+
+  if (game.gameState !== "setup" && game.gameState !== "lobby") {
+    returnToMainMenu();
+  }
+}
+
+btnBack.addEventListener("click", showBackConfirm);
+btnBackNo.addEventListener("click", hideBackConfirm);
+btnBackYes.addEventListener("click", confirmBackNavigation);
 
 // ═══════════════════════════════════════════
 //  LOBBY — START
@@ -240,6 +320,11 @@ function enterWaitingRoom(roomCode, myName, host) {
 
 /** Called by network when room-update fires */
 game.updateLobbyPlayers = function (players) {
+  game.activePlayerColors = players
+    .map((p) => p.color)
+    .filter((color) => Number.isInteger(color))
+    .sort((a, b) => a - b);
+
   // 1. ALWAYS update avatar bot state and name (critical for in-game sync)
   players.forEach((p) => {
     PLAYER_NAMES[p.color] = p.name;
@@ -568,19 +653,28 @@ game.startGameFromServer = function (state) {
 //  CANVAS RESIZE
 // ═══════════════════════════════════════════
 function resize() {
-  const windowRatio = window.innerWidth / window.innerHeight;
-  const gameRatio = SCREEN_W / SCREEN_H;
-  if (windowRatio > gameRatio) {
-    canvas.style.height = "100vh";
-    canvas.style.width = "auto";
-  } else {
-    canvas.style.width = "100vw";
-    canvas.style.height = "auto";
-  }
+  const appRect = appEl.getBoundingClientRect();
+  const appStyle = getComputedStyle(appEl);
+  const safeW =
+    appRect.width -
+    parseFloat(appStyle.paddingLeft || 0) -
+    parseFloat(appStyle.paddingRight || 0);
+  const safeH =
+    appRect.height -
+    parseFloat(appStyle.paddingTop || 0) -
+    parseFloat(appStyle.paddingBottom || 0);
+  const scale = Math.min(safeW / SCREEN_W, safeH / SCREEN_H, 1);
+
+  gameContainer.style.setProperty("--game-width", `${SCREEN_W}px`);
+  gameContainer.style.setProperty("--game-height", `${SCREEN_H}px`);
+  gameContainer.style.setProperty("--game-scale", String(Math.max(scale, 0.1)));
+
   canvas.width = SCREEN_W;
   canvas.height = SCREEN_H;
 }
 window.addEventListener("resize", resize);
+window.visualViewport?.addEventListener("resize", resize);
+window.visualViewport?.addEventListener("scroll", resize);
 resize();
 
 // ═══════════════════════════════════════════
@@ -603,7 +697,7 @@ function sendMyChatMessage(text) {
   const pColor = network.playerColor ?? 0;
   const pName = PLAYER_NAMES[pColor] || "Me";
   game.chat.addMessage(pName, message, PLAYER_COLORS[pColor]);
-  game.showAvatarMessage(pName, message);
+  game.showAvatarMessage(pColor, message);
   network.sendChat(message, pName, PLAYER_COLORS[pColor]);
 }
 
@@ -646,13 +740,13 @@ function handleInput(e) {
   }
 
   // Emoji button
-  if (sx >= 12 && sx <= 84 && sy >= SCREEN_H - 34 && sy <= SCREEN_H - 6) {
+  if (sx >= 12 && sx <= 84 && sy >= SCREEN_H - 50 && sy <= SCREEN_H - 6) {
     game.emojiPanel.visible = !game.emojiPanel.visible;
     game.chat.visible = false;
     return;
   }
   // Chat button
-  if (sx >= 92 && sx <= 164 && sy >= SCREEN_H - 34 && sy <= SCREEN_H - 6) {
+  if (sx >= 92 && sx <= 164 && sy >= SCREEN_H - 50 && sy <= SCREEN_H - 6) {
     game.chat.visible = !game.chat.visible;
     game.chat.active = game.chat.visible;
     game.emojiPanel.visible = false;
@@ -732,8 +826,18 @@ function handleInput(e) {
     }
   }
 
+  // Individual speaker mute beside each opponent avatar
+  for (const p of game.getActivePlayerColors()) {
+    if (p === network.playerColor || !game.avatars[p]) continue;
+    const muteBtn = game.getPlayerMuteButtonRect(p);
+    if (Math.hypot(sx - muteBtn.x, sy - muteBtn.y) <= muteBtn.r + 6) {
+      game.toggleRemotePlayerMute(p);
+      return;
+    }
+  }
+
   // AUTO badge click check (har player ke liye)
-  for (let p = 0; p < game.playerCount; p++) {
+  for (const p of game.getActivePlayerColors()) {
     const av = game.avatars[p];
     if (!av) continue;
     const [avX, avY] = av.position;
@@ -757,14 +861,14 @@ function handleInput(e) {
     }
   }
 
-  if (sx >= 172 && sx <= 244 && sy >= SCREEN_H - 34 && sy <= SCREEN_H - 6) {
+  if (sx >= 172 && sx <= 244 && sy >= SCREEN_H - 50 && sy <= SCREEN_H - 6) {
     network.toggleMic().then((isOn) => {
       game.localMicMuted = !isOn;
     });
     return;
   }
-  if (sx >= 252 && sx <= 324 && sy >= SCREEN_H - 34 && sy <= SCREEN_H - 6) {
-    game.speakerPanelVisible = !game.speakerPanelVisible;
+  if (sx >= 252 && sx <= 324 && sy >= SCREEN_H - 50 && sy <= SCREEN_H - 6) {
+    game.setGlobalSpeakerEnabled(!game.speakerPanelVisible);
     return;
   }
 

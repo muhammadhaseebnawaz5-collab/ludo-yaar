@@ -78,6 +78,8 @@ io.on("connection", (socket) => {
     // Join the room
     const player = room.joinPlayer(sessionId, name || "Host", socket.id);
     socket.join(roomId);
+    socket.roomId = roomId;
+    socket.sessionId = sessionId;
 
     callback({
       success: true,
@@ -143,9 +145,12 @@ io.on("connection", (socket) => {
   });
 
   // Game Actions
-  socket.on("roll-dice", ({ roomId, sessionId }) => {
+  socket.on("roll-dice", ({ roomId, sessionId }, callback) => {
     const room = rooms.get(roomId);
-    if (room) room.handleRollDice(sessionId);
+    const result = room
+      ? room.handleRollDice(sessionId)
+      : { success: false, error: "room-not-found" };
+    if (typeof callback === "function") callback(result);
   });
 
   socket.on("move-token", ({ roomId, sessionId, tokenIndex, rollValue }) => {
@@ -179,13 +184,20 @@ io.on("connection", (socket) => {
   socket.on("chat-message", ({ roomId, message, color }) => {
     if (!roomId) roomId = socket.roomId;
     if (roomId) {
+      const room = rooms.get(roomId);
+      const sender = room?.players.find(
+        (p) => p.sessionId === (message.senderId || socket.sessionId),
+      );
+      const playerId = sender?.colorIndex ?? message.playerId;
       // Ensure message has all required fields
       const fullMessage = {
         senderId: message.senderId || socket.id,
+        playerId,
+        playerColor: message.playerColor || message.color,
         sender: message.sender,
         text: message.text,
         timestamp: message.timestamp || Date.now(),
-        color: color || message.color,
+        color: color || message.color || message.playerColor,
       };
       io.to(roomId).emit("chat-message", { message: fullMessage });
     } else {
