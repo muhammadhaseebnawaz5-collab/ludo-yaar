@@ -932,7 +932,21 @@ function handleInput(e) {
   }
 }
 
-canvas.addEventListener("pointerdown", handleInput, { passive: false });
+function isEventInsideChatUI(e) {
+  const t = e?.target;
+  if (!t) return false;
+  // The real input element is our proxy
+  if (t === mobileChatInput) return true;
+  // If the click is on any known chat control inside canvas-drawn UI, it won't have DOM nodes,
+  // so we only need to guard against the actual DOM input.
+  return false;
+}
+
+canvas.addEventListener("pointerdown", (e) => {
+  // If chat input is active, don't let the canvas handler swallow the tap that should focus the input.
+  if (game?.chat?.active && isEventInsideChatUI(e)) return;
+  handleInput(e);
+}, { passive: false });
 
 mobileChatInput.addEventListener("input", () => {
   game.chat.inputText = mobileChatInput.value;

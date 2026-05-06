@@ -115,7 +115,7 @@ export class LudoRoom {
       isReconnect = true;
     } else {
       if (this.state.gameState !== "lobby") return false;
-      if (this.players.length >= 4) return false;
+      if (this.players.length >= this.playerCount) return false;
 
       const colorMap = this.getColorMap();
 

@@ -139,9 +139,32 @@ io.on("connection", (socket) => {
   // Start Game
   socket.on("start-game", ({ roomId, sessionId }) => {
     const room = rooms.get(roomId);
-    if (room && room.players[0].sessionId === sessionId) {
-      room.startGame();
+
+    console.log("[start-game]", {
+      roomId,
+      sessionId,
+      gameState: room?.state?.gameState,
+      players: room?.players?.length,
+      maxPlayers: room?.playerCount,
+      hostSession: room?.players?.[0]?.sessionId,
+    });
+
+    if (!room) return;
+
+    // Only host can start
+    if (room.players[0]?.sessionId !== sessionId) return;
+
+    // Dynamic player count start guard (selected count)
+    if (room.players.length < room.playerCount) {
+      console.log("[start-game] blocked: not enough players", {
+        required: room.playerCount,
+        got: room.players.length,
+        roomId,
+      });
+      return;
     }
+
+    room.startGame();
   });
 
   // Game Actions

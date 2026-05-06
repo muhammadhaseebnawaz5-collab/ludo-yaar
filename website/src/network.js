@@ -341,6 +341,16 @@ export class NetworkManager {
         this.localStream.getAudioTracks().forEach((track) => {
           track.enabled = true;
         });
+
+        // FIX 5 (Mandatory): never play your own audio
+        // This prevents accidental local monitoring/feedback loops in some browsers.
+        const localAudio = new Audio();
+        localAudio.srcObject = this.localStream;
+        localAudio.muted = true;
+        localAudio.autoplay = true;
+        localAudio.playsInline = true;
+        this._localMutedAudioEl = localAudio;
+
         this.isMicOn = true;
         this.broadcastVoiceStatus();
         this.addLocalTracksToPeers();
@@ -356,6 +366,13 @@ export class NetworkManager {
     } else {
       this.isMicOn = !this.isMicOn;
       this.localStream.getAudioTracks()[0].enabled = this.isMicOn;
+
+      // Keep the “never play own audio” behavior consistent when toggling.
+      if (this._localMutedAudioEl) {
+        this._localMutedAudioEl.muted = true;
+        this._localMutedAudioEl.volume = 0;
+      }
+
       this.broadcastVoiceStatus();
     }
     return this.isMicOn;
@@ -436,9 +453,12 @@ export class NetworkManager {
   }
 
   createPeerConnection(targetSocketId, isInitiator) {
+    // HARD protection: never create duplicate peer connections
     if (this.peers[targetSocketId]) {
-      this.cleanupPeerConnection(targetSocketId);
+      console.warn("Peer already exists, skipping:", targetSocketId);
+      return;
     }
+
     const pc = new RTCPeerConnection({
       iceServers: [
         { urls: "stun:stun.l.google.com:19302" },
@@ -472,12 +492,6 @@ export class NetworkManager {
       }
     };
 
-    if (this.localStream) {
-      this.localStream
-        .getAudioTracks()
-        .forEach((track) => pc.addTrack(track, this.localStream));
-    }
-
     pc.ontrack = (event) => {
       console.log("Received remote audio track from", targetSocketId);
       let audio = this.remoteAudioEls[targetSocketId];
@@ -493,8 +507,9 @@ export class NetworkManager {
       const remoteStream = event.streams[0];
       if (!remoteStream) return;
 
-      // Replace stream only when it changed to avoid repeated playback loops.
-      if (audio.srcObject !== remoteStream) audio.srcObject = remoteStream;
+      // IMPORTANT: prevent multiple tracks/reattach loops inside same element.
+      if (audio.srcObject) return;
+      audio.srcObject = remoteStream;
       this.applyRemoteAudioMuteState(targetSocketId);
     };
 
