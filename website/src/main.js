@@ -15,6 +15,14 @@ const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
 const appEl = document.getElementById("app");
 const gameContainer = document.querySelector(".game-container");
+const mobileChatInput = document.createElement("input");
+mobileChatInput.type = "text";
+mobileChatInput.className = "mobile-chat-input-proxy";
+mobileChatInput.setAttribute("autocomplete", "off");
+mobileChatInput.setAttribute("autocapitalize", "sentences");
+mobileChatInput.setAttribute("autocorrect", "on");
+mobileChatInput.setAttribute("spellcheck", "true");
+gameContainer.appendChild(mobileChatInput);
 
 let game = new LudoGame();
 let network = new NetworkManager(game);
@@ -663,7 +671,7 @@ function resize() {
     appRect.height -
     parseFloat(appStyle.paddingTop || 0) -
     parseFloat(appStyle.paddingBottom || 0);
-  const scale = Math.min(safeW / SCREEN_W, safeH / SCREEN_H, 1);
+  const scale = Math.min(safeW / SCREEN_W, safeH / SCREEN_H);
 
   gameContainer.style.setProperty("--game-width", `${SCREEN_W}px`);
   gameContainer.style.setProperty("--game-height", `${SCREEN_H}px`);
@@ -682,12 +690,30 @@ resize();
 // ═══════════════════════════════════════════
 function getPos(e) {
   const rect = canvas.getBoundingClientRect();
-  const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-  const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+  const touch =
+    e.touches?.[0] ||
+    e.changedTouches?.[0] ||
+    (typeof e.clientX === "number" ? e : null);
+  if (!touch) return null;
+  const clientX = touch.clientX;
+  const clientY = touch.clientY;
   return [
     (clientX - rect.left) * (SCREEN_W / rect.width),
     (clientY - rect.top) * (SCREEN_H / rect.height),
   ];
+}
+
+function syncMobileChatInput() {
+  mobileChatInput.value = game.chat.inputText || "";
+}
+
+function focusMobileChatInput() {
+  syncMobileChatInput();
+  mobileChatInput.focus();
+  mobileChatInput.setSelectionRange(
+    mobileChatInput.value.length,
+    mobileChatInput.value.length,
+  );
 }
 
 function sendMyChatMessage(text) {
@@ -702,8 +728,10 @@ function sendMyChatMessage(text) {
 }
 
 function handleInput(e) {
-  e.preventDefault();
-  const [sx, sy] = getPos(e);
+  if (e.cancelable && e.target === canvas) e.preventDefault();
+  const pos = getPos(e);
+  if (!pos) return;
+  const [sx, sy] = pos;
 
   // Heartbeat to reset server-side auto-turn timer
   if (network) network.sendActivity();
@@ -764,6 +792,7 @@ function handleInput(e) {
     if (closeClicked) {
       game.chat.visible = false;
       game.chat.active = false;
+      mobileChatInput.blur();
       return;
     }
 
@@ -772,6 +801,7 @@ function handleInput(e) {
       sendMyChatMessage(quickAction);
       game.chat.visible = false;
       game.chat.active = false;
+      mobileChatInput.blur();
       return;
     }
 
@@ -783,6 +813,7 @@ function handleInput(e) {
       sy <= inputRect.y + inputRect.h;
     if (inputClicked) {
       game.chat.active = true;
+      focusMobileChatInput();
       return;
     }
 
@@ -796,6 +827,7 @@ function handleInput(e) {
       if (game.chat.inputText.trim()) {
         sendMyChatMessage(game.chat.inputText);
         game.chat.inputText = "";
+        syncMobileChatInput();
         game.chat.visible = false;
         game.chat.active = false;
       }
@@ -805,6 +837,7 @@ function handleInput(e) {
     if (!game.chat.containsPoint(sx, sy)) {
       game.chat.visible = false;
       game.chat.active = false;
+      mobileChatInput.blur();
     }
   }
 
@@ -899,9 +932,31 @@ function handleInput(e) {
   }
 }
 
-canvas.addEventListener("mousedown", handleInput);
-canvas.addEventListener("touchstart", handleInput, { passive: false });
-canvas.addEventListener("touchend", handleInput, { passive: false });
+canvas.addEventListener("pointerdown", handleInput, { passive: false });
+
+mobileChatInput.addEventListener("input", () => {
+  game.chat.inputText = mobileChatInput.value;
+});
+
+mobileChatInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    if (game.chat.inputText.trim()) {
+      sendMyChatMessage(game.chat.inputText);
+      game.chat.inputText = "";
+      syncMobileChatInput();
+      game.chat.visible = false;
+      game.chat.active = false;
+      mobileChatInput.blur();
+    }
+  }
+});
+
+mobileChatInput.addEventListener("blur", () => {
+  if (!game.chat.visible) {
+    game.chat.active = false;
+  }
+});
 
 window.addEventListener("keydown", (e) => {
   if (game.chat.active) {
@@ -909,13 +964,17 @@ window.addEventListener("keydown", (e) => {
       if (game.chat.inputText) {
         sendMyChatMessage(game.chat.inputText);
         game.chat.inputText = "";
+        syncMobileChatInput();
         game.chat.visible = false;
         game.chat.active = false;
+        mobileChatInput.blur();
       }
     } else if (e.key === "Backspace") {
       game.chat.inputText = game.chat.inputText.slice(0, -1);
+      syncMobileChatInput();
     } else if (e.key.length === 1) {
       game.chat.inputText += e.key;
+      syncMobileChatInput();
     }
   } else if (e.key === " " && game.currentPlayer === network.playerColor) {
     e.preventDefault();

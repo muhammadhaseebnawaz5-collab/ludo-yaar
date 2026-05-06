@@ -129,6 +129,7 @@ export class NetworkManager {
     });
 
     this.socket.on("voice-signal", async ({ fromSocketId, signal }) => {
+      if (!fromSocketId || fromSocketId === this.socket.id) return;
       if (!this.peers[fromSocketId]) {
         this.createPeerConnection(fromSocketId, false);
       }
@@ -331,7 +332,11 @@ export class NetworkManager {
     if (!this.localStream) {
       try {
         this.localStream = await navigator.mediaDevices.getUserMedia({
-          audio: true,
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          },
         });
         this.localStream.getAudioTracks().forEach((track) => {
           track.enabled = true;
@@ -417,18 +422,23 @@ export class NetworkManager {
   addLocalTracksToPeers() {
     if (!this.localStream) return;
     Object.values(this.peers).forEach((pc) => {
-      const hasAudioSender = pc
+      const localTrack = this.localStream.getAudioTracks()[0];
+      if (!localTrack) return;
+      const audioSender = pc
         .getSenders()
-        .some((s) => s.track && s.track.kind === "audio");
-      if (!hasAudioSender) {
-        this.localStream
-          .getAudioTracks()
-          .forEach((track) => pc.addTrack(track, this.localStream));
+        .find((s) => s.track && s.track.kind === "audio");
+      if (audioSender) {
+        audioSender.replaceTrack(localTrack);
+      } else {
+        pc.addTrack(localTrack, this.localStream);
       }
     });
   }
 
   createPeerConnection(targetSocketId, isInitiator) {
+    if (this.peers[targetSocketId]) {
+      this.cleanupPeerConnection(targetSocketId);
+    }
     const pc = new RTCPeerConnection({
       iceServers: [
         { urls: "stun:stun.l.google.com:19302" },
@@ -464,7 +474,7 @@ export class NetworkManager {
 
     if (this.localStream) {
       this.localStream
-        .getTracks()
+        .getAudioTracks()
         .forEach((track) => pc.addTrack(track, this.localStream));
     }
 
@@ -480,10 +490,11 @@ export class NetworkManager {
         // Don't add to DOM to prevent echo feedback
         this.remoteAudioEls[targetSocketId] = audio;
       }
-      // Only update srcObject if it's not already set
-      if (!audio.srcObject || audio.srcObject !== event.streams[0]) {
-        audio.srcObject = event.streams[0];
-      }
+      const remoteStream = event.streams[0];
+      if (!remoteStream) return;
+
+      // Replace stream only when it changed to avoid repeated playback loops.
+      if (audio.srcObject !== remoteStream) audio.srcObject = remoteStream;
       this.applyRemoteAudioMuteState(targetSocketId);
     };
 
@@ -498,7 +509,11 @@ export class NetworkManager {
         `Connection State [${targetSocketId}]: ${pc.connectionState}`,
       );
       // Clean up when connection closes
-      if (pc.connectionState === "failed" || pc.connectionState === "closed") {
+      if (
+        pc.connectionState === "failed" ||
+        pc.connectionState === "closed" ||
+        pc.connectionState === "disconnected"
+      ) {
         this.cleanupPeerConnection(targetSocketId);
       }
     };
