@@ -655,91 +655,83 @@ export class LudoGame {
     ];
 
     buttons.forEach((btn, i) => {
-      const bx = 12 + i * 80;
-      const by = SCREEN_H - 48;
-      ctx.fillStyle = btn.state
-        ? "rgba(100,40,160,0.95)"
-        : "rgba(45,18,80,0.88)";
-      ctx.beginPath();
-      ctx.roundRect(bx, by, 72, 40, 8);
-      ctx.fill();
-      ctx.strokeStyle = "rgba(255,255,255,0.18)";
-      ctx.lineWidth = 1;
-      ctx.stroke();
+      const bx = 12 + i * 50; // Reduced spacing from 80 to 50
+      const by = SCREEN_H - 40; // Moved up slightly from 48 to 40
+      const iconSize = 24; // Smaller icons
 
-      const iconX = bx + 36;
-      const iconY = by + 20;
-      ctx.fillStyle = "#fff";
-      ctx.strokeStyle = "#fff";
+      const iconX = bx + iconSize / 2;
+      const iconY = by + iconSize / 2;
+      ctx.fillStyle = btn.state ? "#ffffff" : "rgba(255,255,255,0.6)"; // White when active, semi-transparent when inactive
+      ctx.strokeStyle = btn.state ? "#ffffff" : "rgba(255,255,255,0.3)";
 
       if (btn.id === "emoji") {
         ctx.lineWidth = 1.5;
         ctx.beginPath();
-        ctx.arc(iconX, iconY, 10, 0, Math.PI * 2);
+        ctx.arc(iconX, iconY, 8, 0, Math.PI * 2); // Smaller circle
         ctx.stroke();
         ctx.beginPath();
-        ctx.arc(iconX - 3, iconY - 2, 1.5, 0, Math.PI * 2);
+        ctx.arc(iconX - 2.5, iconY - 2, 1, 0, Math.PI * 2); // Smaller eyes
         ctx.fill();
         ctx.beginPath();
-        ctx.arc(iconX + 3, iconY - 2, 1.5, 0, Math.PI * 2);
+        ctx.arc(iconX + 2.5, iconY - 2, 1, 0, Math.PI * 2);
         ctx.fill();
         ctx.beginPath();
-        ctx.arc(iconX, iconY, 5, 0, Math.PI);
+        ctx.arc(iconX, iconY, 4, 0, Math.PI); // Smaller smile
         ctx.stroke();
       } else if (btn.id === "chat") {
         ctx.lineWidth = 1.5;
         ctx.beginPath();
-        ctx.roundRect(iconX - 10, iconY - 7, 20, 14, 4);
+        ctx.roundRect(iconX - 8, iconY - 6, 16, 12, 3); // Smaller chat bubble
         ctx.stroke();
         ctx.beginPath();
-        ctx.moveTo(iconX - 5, iconY + 7);
-        ctx.lineTo(iconX - 3, iconY + 12);
-        ctx.lineTo(iconX, iconY + 7);
+        ctx.moveTo(iconX - 4, iconY + 6);
+        ctx.lineTo(iconX - 2, iconY + 10);
+        ctx.lineTo(iconX + 1, iconY + 6);
         ctx.fill();
       } else if (btn.id === "mic") {
         ctx.beginPath();
-        ctx.roundRect(iconX - 3, iconY - 8, 6, 12, 3);
+        ctx.roundRect(iconX - 2, iconY - 6, 4, 9, 2); // Smaller mic body
         ctx.fill();
         ctx.beginPath();
-        ctx.arc(iconX, iconY - 2, 8, 0, Math.PI);
+        ctx.arc(iconX, iconY - 1, 6, 0, Math.PI); // Smaller mic arc
         ctx.stroke();
         ctx.beginPath();
-        ctx.moveTo(iconX, iconY + 6);
-        ctx.lineTo(iconX, iconY + 10);
+        ctx.moveTo(iconX, iconY + 5);
+        ctx.lineTo(iconX, iconY + 8);
         ctx.stroke();
         ctx.beginPath();
-        ctx.moveTo(iconX - 4, iconY + 10);
-        ctx.lineTo(iconX + 4, iconY + 10);
+        ctx.moveTo(iconX - 3, iconY + 8);
+        ctx.lineTo(iconX + 3, iconY + 8);
         ctx.stroke();
         if (this.localMicMuted) {
           ctx.strokeStyle = "#FF3333";
-          ctx.lineWidth = 2.5;
+          ctx.lineWidth = 2;
           ctx.beginPath();
-          ctx.moveTo(iconX - 10, iconY - 8);
-          ctx.lineTo(iconX + 10, iconY + 8);
+          ctx.moveTo(iconX - 8, iconY - 6);
+          ctx.lineTo(iconX + 8, iconY + 6);
           ctx.stroke();
         }
       } else if (btn.id === "audio") {
         ctx.beginPath();
-        ctx.moveTo(iconX - 6, iconY - 3);
-        ctx.lineTo(iconX - 3, iconY - 3);
-        ctx.lineTo(iconX + 2, iconY - 7);
-        ctx.lineTo(iconX + 2, iconY + 7);
-        ctx.lineTo(iconX - 3, iconY + 3);
-        ctx.lineTo(iconX - 6, iconY + 3);
+        ctx.moveTo(iconX - 5, iconY - 2);
+        ctx.lineTo(iconX - 2, iconY - 2);
+        ctx.lineTo(iconX + 1, iconY - 5);
+        ctx.lineTo(iconX + 1, iconY + 5);
+        ctx.lineTo(iconX - 2, iconY + 2);
+        ctx.lineTo(iconX - 5, iconY + 2);
         ctx.fill();
         ctx.beginPath();
-        ctx.arc(iconX + 2, iconY, 5, -Math.PI / 3, Math.PI / 3);
+        ctx.arc(iconX + 1, iconY, 4, -Math.PI / 3, Math.PI / 3); // Smaller speaker waves
         ctx.stroke();
         ctx.beginPath();
-        ctx.arc(iconX + 2, iconY, 8, -Math.PI / 3, Math.PI / 3);
+        ctx.arc(iconX + 1, iconY, 6, -Math.PI / 3, Math.PI / 3);
         ctx.stroke();
         if (!this.speakerPanelVisible) {
           ctx.strokeStyle = "#FF3333";
-          ctx.lineWidth = 2;
+          ctx.lineWidth = 1.5;
           ctx.beginPath();
-          ctx.moveTo(iconX - 8, iconY - 8);
-          ctx.lineTo(iconX + 10, iconY + 8);
+          ctx.moveTo(iconX - 6, iconY - 6);
+          ctx.lineTo(iconX + 8, iconY + 6);
           ctx.stroke();
         }
       }
@@ -853,7 +845,7 @@ export class LudoGame {
     const badgeW = 72,
       badgeH = 26;
     const badgeX = avX - badgeW / 2;
-    const badgeY = isTop ? avY - avR - 38 : avY + avR + 22;
+    const badgeY = isTop ? avY - avR - 28 : avY + avR + 12; // Moved higher (reduced offset from 38 to 28 for top, 22 to 12 for bottom)
 
     const showBadge = this.avatars[i].botEnabled || !this.avatars[i].isOnline;
     if (showBadge) {
@@ -1429,7 +1421,7 @@ export class LudoGame {
   finishMove(token, from, to) {
     token.steps = to;
     this.moveTokenSequentially(token, from, to);
-    setTimeout(() => this.postMoveLogic(token), (to - from) * 120 + 80);
+    setTimeout(() => this.postMoveLogic(token), (to - from) * 80 + 50);
   }
 
   moveTokenSequentially(token, from, to) {

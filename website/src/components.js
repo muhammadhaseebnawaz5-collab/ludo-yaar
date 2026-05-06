@@ -85,8 +85,8 @@ export class Token {
       const dy = target[1] - this.startPy;
       const dist = Math.sqrt(dx * dx + dy * dy);
 
-      // Speed of hop depends on frame rate, complete hop in ~10-15 frames
-      this.hopProgress += 0.08;
+      // Speed of hop depends on frame rate, complete hop in ~8-10 frames (faster)
+      this.hopProgress += 0.12;
 
       if (this.hopProgress >= 1) {
         this.px = target[0];

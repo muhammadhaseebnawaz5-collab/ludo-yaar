@@ -739,14 +739,14 @@ function handleInput(e) {
     }
   }
 
-  // Emoji button
-  if (sx >= 12 && sx <= 84 && sy >= SCREEN_H - 50 && sy <= SCREEN_H - 6) {
+  // Emoji button (icon at position 12-36)
+  if (sx >= 6 && sx <= 42 && sy >= SCREEN_H - 52 && sy <= SCREEN_H - 16) {
     game.emojiPanel.visible = !game.emojiPanel.visible;
     game.chat.visible = false;
     return;
   }
-  // Chat button
-  if (sx >= 92 && sx <= 164 && sy >= SCREEN_H - 50 && sy <= SCREEN_H - 6) {
+  // Chat button (icon at position 62-86)
+  if (sx >= 56 && sx <= 92 && sy >= SCREEN_H - 52 && sy <= SCREEN_H - 16) {
     game.chat.visible = !game.chat.visible;
     game.chat.active = game.chat.visible;
     game.emojiPanel.visible = false;
@@ -843,7 +843,7 @@ function handleInput(e) {
     const [avX, avY] = av.position;
     const isTop = game.getVisualIndex(p) <= 1;
     const avR = 30;
-    const badgeY = isTop ? avY - avR - 38 : avY + avR + 22;
+    const badgeY = isTop ? avY - avR - 28 : avY + avR + 12; // Updated to match new badge position
 
     if (sx >= avX - 36 && sx <= avX + 36 && sy >= badgeY && sy <= badgeY + 26) {
       // Sirf apna badge click ho sakta hai
@@ -861,13 +861,13 @@ function handleInput(e) {
     }
   }
 
-  if (sx >= 172 && sx <= 244 && sy >= SCREEN_H - 50 && sy <= SCREEN_H - 6) {
+  if (sx >= 106 && sx <= 142 && sy >= SCREEN_H - 52 && sy <= SCREEN_H - 16) {
     network.toggleMic().then((isOn) => {
       game.localMicMuted = !isOn;
     });
     return;
   }
-  if (sx >= 252 && sx <= 324 && sy >= SCREEN_H - 50 && sy <= SCREEN_H - 6) {
+  if (sx >= 156 && sx <= 192 && sy >= SCREEN_H - 52 && sy <= SCREEN_H - 16) {
     game.setGlobalSpeakerEnabled(!game.speakerPanelVisible);
     return;
   }
