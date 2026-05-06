@@ -396,7 +396,7 @@ export class NetworkManager {
       (color !== undefined && this.mutedPlayerColors.has(color));
 
     audio.muted = muted;
-    audio.volume = muted ? 0 : 1;
+    audio.volume = muted ? 0 : 0.7; // Reduced volume to prevent clipping and echo
 
     if (audio.srcObject) {
       audio.srcObject.getAudioTracks().forEach((track) => {
@@ -407,7 +407,10 @@ export class NetworkManager {
     if (muted) {
       audio.pause();
     } else {
-      audio.play().catch((e) => console.warn("Audio play failed", e));
+      audio.play().catch((e) => {
+        // Autoplay might be blocked on mobile, ignore silently
+        console.debug("Audio play deferred:", e);
+      });
     }
   }
 
@@ -472,11 +475,15 @@ export class NetworkManager {
         audio = new Audio();
         audio.autoplay = true;
         audio.playsInline = true;
-        audio.volume = 1.0;
+        audio.volume = 0.7; // Set default volume to prevent clipping
         audio.muted = false;
+        // Don't add to DOM to prevent echo feedback
         this.remoteAudioEls[targetSocketId] = audio;
       }
-      audio.srcObject = event.streams[0];
+      // Only update srcObject if it's not already set
+      if (!audio.srcObject || audio.srcObject !== event.streams[0]) {
+        audio.srcObject = event.streams[0];
+      }
       this.applyRemoteAudioMuteState(targetSocketId);
     };
 
@@ -490,6 +497,10 @@ export class NetworkManager {
       console.log(
         `Connection State [${targetSocketId}]: ${pc.connectionState}`,
       );
+      // Clean up when connection closes
+      if (pc.connectionState === "failed" || pc.connectionState === "closed") {
+        this.cleanupPeerConnection(targetSocketId);
+      }
     };
 
     if (isInitiator) {
@@ -520,5 +531,31 @@ export class NetworkManager {
       }
     };
     dc.onclose = () => console.log(`DataChannel [${sid}] is CLOSED`);
+  }
+
+  cleanupPeerConnection(targetSocketId) {
+    const pc = this.peers[targetSocketId];
+    if (pc) {
+      // Close the peer connection
+      pc.close();
+      delete this.peers[targetSocketId];
+    }
+
+    // Clean up audio element
+    const audio = this.remoteAudioEls[targetSocketId];
+    if (audio) {
+      audio.pause();
+      audio.srcObject = null;
+      delete this.remoteAudioEls[targetSocketId];
+    }
+
+    // Clean up data channel
+    const dc = this.dataChannels[targetSocketId];
+    if (dc) {
+      dc.close();
+      delete this.dataChannels[targetSocketId];
+    }
+
+    console.log(`Cleaned up connection for ${targetSocketId}`);
   }
 }

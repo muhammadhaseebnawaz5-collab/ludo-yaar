@@ -901,6 +901,7 @@ function handleInput(e) {
 
 canvas.addEventListener("mousedown", handleInput);
 canvas.addEventListener("touchstart", handleInput, { passive: false });
+canvas.addEventListener("touchend", handleInput, { passive: false });
 
 window.addEventListener("keydown", (e) => {
   if (game.chat.active) {

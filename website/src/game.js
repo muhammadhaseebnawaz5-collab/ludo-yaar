@@ -847,7 +847,9 @@ export class LudoGame {
     const badgeX = avX - badgeW / 2;
     const badgeY = isTop ? avY - avR - 28 : avY + avR + 12; // Moved higher (reduced offset from 38 to 28 for top, 22 to 12 for bottom)
 
-    const showBadge = this.avatars[i].botEnabled || !this.avatars[i].isOnline;
+    const showBadge =
+      !this.avatars[i].isOnline ||
+      (i === this.clientPlayer && this.avatars[i].botEnabled);
     if (showBadge) {
       const isOffline = !this.avatars[i].isOnline;
       const badgeText = isOffline ? "OFFLINE" : "AUTO";

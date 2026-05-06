@@ -54,7 +54,8 @@ body {
 body {
   font-family: var(--font);
   background: radial-gradient(circle at center, #3d143d 0%, #1a081a 100%);
-  width: 100vw;
+  width: 100%;
+  height: 100%;
   min-height: 100vh;
   min-height: 100dvh;
   display: flex;
@@ -63,24 +64,25 @@ body {
   overflow: hidden;
   position: fixed;
   inset: 0;
-  touch-action: none;
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
 }
 
 #app {
-  width: 100vw;
-  height: 100vh;
-  height: 100dvh;
+  width: 100%;
+  height: 100%;
   min-height: 100vh;
   min-height: 100dvh;
   display: flex;
   justify-content: center;
   align-items: center;
-  padding:
-    max(8px, env(safe-area-inset-top))
-    max(8px, env(safe-area-inset-right))
-    max(8px, env(safe-area-inset-bottom))
-    max(8px, env(safe-area-inset-left));
+  padding: env(safe-area-inset-top) env(safe-area-inset-right)
+    env(safe-area-inset-bottom) env(safe-area-inset-left);
   overflow: hidden;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 /* ── Game Container ── */
@@ -97,6 +99,18 @@ body {
   border: 3px solid rgba(123, 63, 216, 0.4);
   background: #1e0a3c;
   will-change: transform;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+@media (max-width: 600px) {
+  .game-container {
+    border-radius: 12px;
+    border-width: 2px;
+  }
 }
 
 canvas {
@@ -106,7 +120,11 @@ canvas {
   image-rendering: pixelated;
   image-rendering: crisp-edges;
   cursor: pointer;
-  touch-action: none;
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  pointer-events: auto;
 }
 
 .app-back-btn {
