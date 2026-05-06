@@ -237,21 +237,26 @@ btnVsComputer.addEventListener("click", () => {
   btnVsComputer.disabled = true;
   btnVsComputer.textContent = "⏳ Loading…";
 
-  // Create a 2-player room and start it immediately
+  // Create a 2-player room and start it after the server has registered the room
   network.createRoom(name, 2, false, (res) => {
     btnVsComputer.disabled = false;
     btnVsComputer.textContent = "🤖 VS COMPUTER";
-    if (res.success) {
-      window.debugLog(`VS COMPUTER room created: ${res.roomId}`);
-      isHost = true;
-      network.startGame();
-      window.debugLog("StartGame command sent for VS COMPUTER");
-    } else {
+    if (!res.success) {
       window.debugLog(
         `VS COMPUTER room creation failed: ${res.error}`,
         "error",
       );
+      return;
     }
+
+    window.debugLog(`VS COMPUTER room created: ${res.roomId}`);
+    isHost = true;
+
+    // Give socket.io a moment so room/start-game ordering is consistent
+    setTimeout(() => {
+      network.startGame();
+      window.debugLog("StartGame command sent for VS COMPUTER");
+    }, 500);
   });
 });
 
@@ -657,28 +662,17 @@ game.startGameFromServer = function (state) {
   }
 })();
 
-// ═══════════════════════════════════════════
-//  CANVAS RESIZE
-// ═══════════════════════════════════════════
 function resize() {
-  const appRect = appEl.getBoundingClientRect();
-  const appStyle = getComputedStyle(appEl);
-  const safeW =
-    appRect.width -
-    parseFloat(appStyle.paddingLeft || 0) -
-    parseFloat(appStyle.paddingRight || 0);
-  const safeH =
-    appRect.height -
-    parseFloat(appStyle.paddingTop || 0) -
-    parseFloat(appStyle.paddingBottom || 0);
-  const scale = Math.min(safeW / SCREEN_W, safeH / SCREEN_H);
+  const rect = appEl.getBoundingClientRect();
+  const scale = Math.min(rect.width / SCREEN_W, rect.height / SCREEN_H);
 
-  gameContainer.style.setProperty("--game-width", `${SCREEN_W}px`);
-  gameContainer.style.setProperty("--game-height", `${SCREEN_H}px`);
-  gameContainer.style.setProperty("--game-scale", String(Math.max(scale, 0.1)));
-
+  // Keep canvas logical coordinate system stable for pointer mapping
   canvas.width = SCREEN_W;
   canvas.height = SCREEN_H;
+
+  // Scale the DOM element (NOT via transform: scale) to preserve pointer mapping
+  canvas.style.width = `${SCREEN_W * scale}px`;
+  canvas.style.height = `${SCREEN_H * scale}px`;
 }
 window.addEventListener("resize", resize);
 window.visualViewport?.addEventListener("resize", resize);
@@ -690,16 +684,11 @@ resize();
 // ═══════════════════════════════════════════
 function getPos(e) {
   const rect = canvas.getBoundingClientRect();
-  const touch =
-    e.touches?.[0] ||
-    e.changedTouches?.[0] ||
-    (typeof e.clientX === "number" ? e : null);
-  if (!touch) return null;
-  const clientX = touch.clientX;
-  const clientY = touch.clientY;
+  const touch = e.touches?.[0] || e.changedTouches?.[0] || e;
+
   return [
-    (clientX - rect.left) * (SCREEN_W / rect.width),
-    (clientY - rect.top) * (SCREEN_H / rect.height),
+    (touch.clientX - rect.left) * (SCREEN_W / rect.width),
+    (touch.clientY - rect.top) * (SCREEN_H / rect.height),
   ];
 }
 
@@ -769,12 +758,15 @@ function handleInput(e) {
 
   // Emoji button (icon at position 12-36)
   if (sx >= 6 && sx <= 42 && sy >= SCREEN_H - 52 && sy <= SCREEN_H - 16) {
-    game.emojiPanel.visible = !game.emojiPanel.visible;
-    game.chat.visible = false;
-    return;
+    // Increase touch target for mobile (>=44px)
+    if (sx >= 0 && sx <= 48 && sy >= SCREEN_H - 60 && sy <= SCREEN_H - 8) {
+      game.emojiPanel.visible = !game.emojiPanel.visible;
+      game.chat.visible = false;
+      return;
+    }
   }
-  // Chat button (icon at position 62-86)
-  if (sx >= 56 && sx <= 92 && sy >= SCREEN_H - 52 && sy <= SCREEN_H - 16) {
+  // Chat button (increase touch target)
+  if (sx >= 48 && sx <= 100 && sy >= SCREEN_H - 60 && sy <= SCREEN_H - 8) {
     game.chat.visible = !game.chat.visible;
     game.chat.active = game.chat.visible;
     game.emojiPanel.visible = false;
@@ -851,7 +843,7 @@ function handleInput(e) {
     const clY = isTop ? 18 : SCREEN_H - 152;
     const crX = clX + 62,
       crY = clY + 23;
-    if (Math.hypot(sx - crX, sy - crY) <= 24) {
+    if (Math.hypot(sx - crX, sy - crY) <= 36) {
       if (game.currentPlayer === network.playerColor) {
         network.rollDice();
       }
@@ -863,7 +855,7 @@ function handleInput(e) {
   for (const p of game.getActivePlayerColors()) {
     if (p === network.playerColor || !game.avatars[p]) continue;
     const muteBtn = game.getPlayerMuteButtonRect(p);
-    if (Math.hypot(sx - muteBtn.x, sy - muteBtn.y) <= muteBtn.r + 6) {
+    if (Math.hypot(sx - muteBtn.x, sy - muteBtn.y) <= muteBtn.r + 16) {
       game.toggleRemotePlayerMute(p);
       return;
     }
@@ -878,7 +870,13 @@ function handleInput(e) {
     const avR = 30;
     const badgeY = isTop ? avY - avR - 28 : avY + avR + 12; // Updated to match new badge position
 
-    if (sx >= avX - 36 && sx <= avX + 36 && sy >= badgeY && sy <= badgeY + 26) {
+    // enlarge auto/bot badge hitbox for touch
+    if (
+      sx >= avX - 44 &&
+      sx <= avX + 44 &&
+      sy >= badgeY - 6 &&
+      sy <= badgeY + 34
+    ) {
       // Sirf apna badge click ho sakta hai
       if (p === network.playerColor) {
         const newState = !av.botEnabled;
@@ -918,7 +916,11 @@ function handleInput(e) {
     for (let i = 0; i < game.emojiPanel.emojis.length; i++) {
       const ex = exBase + pad + (i % cols) * (size + pad) + size / 2;
       const ey = eyBase + pad + Math.floor(i / cols) * (size + pad) + size / 2;
-      if (Math.abs(sx - ex) < size / 2 && Math.abs(sy - ey) < size / 2) {
+      // enlarge emoji hitbox for touch
+      if (
+        Math.abs(sx - ex) < size / 2 + 10 &&
+        Math.abs(sy - ey) < size / 2 + 10
+      ) {
         const emoji = game.emojiPanel.emojis[i];
         const myAvatar = game.avatars[network.playerColor];
         if (myAvatar) {
@@ -942,11 +944,15 @@ function isEventInsideChatUI(e) {
   return false;
 }
 
-canvas.addEventListener("pointerdown", (e) => {
-  // If chat input is active, don't let the canvas handler swallow the tap that should focus the input.
-  if (game?.chat?.active && isEventInsideChatUI(e)) return;
-  handleInput(e);
-}, { passive: false });
+canvas.addEventListener(
+  "pointerdown",
+  (e) => {
+    // If chat input is active, don't let the canvas handler swallow the tap that should focus the input.
+    if (game?.chat?.active && isEventInsideChatUI(e)) return;
+    handleInput(e);
+  },
+  { passive: false },
+);
 
 mobileChatInput.addEventListener("input", () => {
   game.chat.inputText = mobileChatInput.value;
