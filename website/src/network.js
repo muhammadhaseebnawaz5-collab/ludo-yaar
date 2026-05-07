@@ -9,10 +9,12 @@ export class NetworkManager {
         process.env.NODE_ENV === "development"
           ? "http://localhost:3000"
           : window.location.origin;
+      console.log("🔌 Attempting to connect to socket server:", socketUrl);
       this.socket = io(socketUrl);
+      this.setupSocketEvents();
     } else {
       console.error(
-        "Socket.io not found! The game will not be able to connect to the server.",
+        "❌ Socket.io not found! The game will not be able to connect to the server. Make sure the CDN script is loaded.",
       );
     }
 
@@ -48,7 +50,7 @@ export class NetworkManager {
 
   setupSocketEvents() {
     this.socket.on("connect", () => {
-      console.log("WebSocket connected:", this.socket.id);
+      console.log("✅ WebSocket connected:", this.socket.id);
       const name = localStorage.getItem("ludoLastName") || "Player";
       this._emitRegister(name);
 
@@ -56,6 +58,14 @@ export class NetworkManager {
       if (this.roomId && this.sessionId) {
         this.attemptAutoRejoin(name);
       }
+    });
+
+    this.socket.on("disconnect", () => {
+      console.log("❌ WebSocket disconnected");
+    });
+
+    this.socket.on("connect_error", (error) => {
+      console.error("❌ WebSocket connection error:", error);
     });
 
     this.socket.on("room-update", (data) => {
@@ -222,6 +232,14 @@ export class NetworkManager {
   }
 
   createRoom(name, count, teamUpMode, callback) {
+    if (!this.socket || !this.socket.connected) {
+      callback({
+        success: false,
+        error: "Server se connection nahi hai. Reload karein.",
+      });
+      return;
+    }
+
     this.socket.emit("create-room", { name, count, teamUpMode }, (res) => {
       if (res.success) {
         this.roomId = res.roomId;
@@ -359,8 +377,7 @@ export class NetworkManager {
           track.enabled = true;
         });
 
-        // FIX 5 (Mandatory): never play your own audio
-        // This prevents accidental local monitoring/feedback loops in some browsers.
+        // FIX: never play your own audio
         const localAudio = new Audio();
         localAudio.srcObject = this.localStream;
         localAudio.muted = true;
@@ -384,7 +401,6 @@ export class NetworkManager {
       this.isMicOn = !this.isMicOn;
       this.localStream.getAudioTracks()[0].enabled = this.isMicOn;
 
-      // Keep the “never play own audio” behavior consistent when toggling.
       if (this._localMutedAudioEl) {
         this._localMutedAudioEl.muted = true;
         this._localMutedAudioEl.volume = 0;
@@ -435,7 +451,7 @@ export class NetworkManager {
       (color !== undefined && this.mutedPlayerColors.has(color));
 
     audio.muted = muted;
-    audio.volume = muted ? 0 : 0.7; // Reduced volume to prevent clipping and echo
+    audio.volume = muted ? 0 : 0.7;
 
     if (audio.srcObject) {
       audio.srcObject.getAudioTracks().forEach((track) => {
@@ -447,7 +463,6 @@ export class NetworkManager {
       audio.pause();
     } else {
       audio.play().catch((e) => {
-        // Autoplay might be blocked on mobile, ignore silently
         console.debug("Audio play deferred:", e);
       });
     }
@@ -470,7 +485,6 @@ export class NetworkManager {
   }
 
   createPeerConnection(targetSocketId, isInitiator) {
-    // HARD protection: never create duplicate peer connections
     if (this.peers[targetSocketId]) {
       console.warn("Peer already exists, skipping:", targetSocketId);
       return;
@@ -484,12 +498,10 @@ export class NetworkManager {
         { urls: "stun:stun3.l.google.com:19302" },
         { urls: "stun:stun4.l.google.com:19302" },
         { urls: "stun:global.stun.twilio.com:3478" },
-        // { urls: 'turn:global.turn.twilio.com:3478', username: 'guest', credential: 'guest' }
       ],
     });
     this.peers[targetSocketId] = pc;
 
-    // Data Channel for Chat
     if (isInitiator) {
       const dc = pc.createDataChannel("chat");
       this.setupDataChannel(targetSocketId, dc);
@@ -510,21 +522,18 @@ export class NetworkManager {
     };
 
     pc.ontrack = (event) => {
-      console.log("Received remote audio track from", targetSocketId);
       let audio = this.remoteAudioEls[targetSocketId];
       if (!audio) {
         audio = new Audio();
         audio.autoplay = true;
         audio.playsInline = true;
-        audio.volume = 0.7; // Set default volume to prevent clipping
+        audio.volume = 0.7;
         audio.muted = false;
-        // Don't add to DOM to prevent echo feedback
         this.remoteAudioEls[targetSocketId] = audio;
       }
       const remoteStream = event.streams[0];
       if (!remoteStream) return;
 
-      // IMPORTANT: prevent multiple tracks/reattach loops inside same element.
       if (audio.srcObject) return;
       audio.srcObject = remoteStream;
       this.applyRemoteAudioMuteState(targetSocketId);
@@ -540,7 +549,6 @@ export class NetworkManager {
       console.log(
         `Connection State [${targetSocketId}]: ${pc.connectionState}`,
       );
-      // Clean up when connection closes
       if (
         pc.connectionState === "failed" ||
         pc.connectionState === "closed" ||
@@ -583,12 +591,10 @@ export class NetworkManager {
   cleanupPeerConnection(targetSocketId) {
     const pc = this.peers[targetSocketId];
     if (pc) {
-      // Close the peer connection
       pc.close();
       delete this.peers[targetSocketId];
     }
 
-    // Clean up audio element
     const audio = this.remoteAudioEls[targetSocketId];
     if (audio) {
       audio.pause();
@@ -596,7 +602,6 @@ export class NetworkManager {
       delete this.remoteAudioEls[targetSocketId];
     }
 
-    // Clean up data channel
     const dc = this.dataChannels[targetSocketId];
     if (dc) {
       dc.close();
@@ -604,5 +609,15 @@ export class NetworkManager {
     }
 
     console.log(`Cleaned up connection for ${targetSocketId}`);
+  }
+
+  getSocketStatus() {
+    return {
+      ioAvailable: typeof io !== "undefined",
+      socketExists: !!this.socket,
+      connected: this.socket?.connected,
+      id: this.socket?.id,
+      url: this.socket?.io?.uri,
+    };
   }
 }

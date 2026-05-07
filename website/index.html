@@ -6,10 +6,10 @@
       name="viewport"
       content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
     />
-    <title>Ludo Star - Play Online with Friends</title>
+    <title>Ludo yaar - Play Online with Friends</title>
     <meta
       name="description"
-      content="Play Ludo Star with friends online. Create private tables, invite friends directly, and enjoy real-time multiplayer Ludo."
+      content="Play Ludo yaar with friends online. Create private tables, invite friends directly, and enjoy real-time multiplayer Ludo."
     />
     <link rel="stylesheet" href="./style.css" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -85,7 +85,13 @@
             </div>
 
             <!-- START button -->
-            <button id="btnStart" class="btn-start">▶ PLAY WITH FRIENDS</button>
+            <button
+              id="btnStart"
+              class="btn-start"
+              onclick="window.__ludoStart?.()"
+            >
+              ▶ PLAY WITH FRIENDS
+            </button>
 
             <!-- VS COMPUTER button -->
             <button id="btnVsComputer" class="btn-vs-computer">
@@ -247,7 +253,6 @@
     </div>
 
     <script src="https://cdn.socket.io/4.8.0/socket.io.min.js"></script>
-    <script src="./src/debug.js"></script>
     <script type="module" src="./src/main.js"></script>
   </body>
 </html>

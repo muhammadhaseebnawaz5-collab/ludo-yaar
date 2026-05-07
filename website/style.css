@@ -51,6 +51,12 @@ body {
   width: 100%;
 }
 
+/* ✅ Global hidden class — MUST be pointer-events: none */
+.hidden {
+  pointer-events: none !important;
+  opacity: 0 !important;
+}
+
 body {
   font-family: var(--font);
   background: radial-gradient(circle at center, #3d143d 0%, #1a081a 100%);
@@ -1308,4 +1314,34 @@ select {
     border: none;
     box-shadow: none;
   }
+}
+
+/* ═══════════════════════════════════════════
+   FIX: Button click issue for 2P/3P
+═══════════════════════════════════════════ */
+.btn-team-up.hidden {
+  display: none !important;
+}
+
+.deco-circle {
+  pointer-events: none !important;
+}
+
+#btnStart,
+#btnVsComputer,
+#btnOpenJoin,
+.count-btn {
+  position: relative !important;
+  z-index: 100 !important;
+  pointer-events: auto !important;
+}
+
+.lobby-content {
+  position: relative;
+  z-index: 10;
+}
+
+.player-count-row {
+  position: relative;
+  z-index: 50;
 }

@@ -17,9 +17,17 @@ const io = new Server(server, {
   cors: { origin: "*" },
 });
 
-// Serve frontend dist locally for production deployment
-app.use(express.static(path.join(__dirname, "../website/dist")));
-app.use(express.static(path.join(__dirname, "../website"))); // Fallback for local dev without dist
+// Serve frontend files.
+// In local development, prefer the source website files so changes are visible immediately.
+const websiteRoot = path.join(__dirname, "../website");
+const websiteDist = path.join(__dirname, "../website/dist");
+
+if (process.env.NODE_ENV === "production") {
+  app.use(express.static(websiteDist));
+} else {
+  app.use(express.static(websiteRoot));
+  app.use(express.static(websiteDist)); // fallback if dist is present and source file is missing
+}
 
 const rooms = new Map();
 
@@ -63,6 +71,12 @@ io.on("connection", (socket) => {
 
   // Creates a new room
   socket.on("create-room", ({ name, count, teamUpMode }, callback) => {
+    console.log("[create-room] request", {
+      socketId: socket.id,
+      name,
+      count,
+      teamUpMode: !!teamUpMode,
+    });
     // Generate a robust 6-digit alphanumeric code
     const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
     let roomId = "";
@@ -86,13 +100,21 @@ io.on("connection", (socket) => {
     socket.roomId = roomId;
     socket.sessionId = sessionId;
 
-    callback({
+    const res = {
       success: true,
       roomId,
       sessionId,
       playerColor: player.colorIndex,
       isHost: true,
       playerCount: room.playerCount,
+    };
+    callback(res);
+    console.log("[create-room] callback success", {
+      socketId: socket.id,
+      roomId: res.roomId,
+      sessionId: res.sessionId,
+      playerCount: res.playerCount,
+      playerColor: res.playerColor,
     });
 
     io.to(roomId).emit("room-update", {

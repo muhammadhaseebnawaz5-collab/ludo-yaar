@@ -28,8 +28,24 @@ let game = new LudoGame();
 let network = new NetworkManager(game);
 game.network = network;
 
+function setCanvasInteractivity(enabled) {
+  // When we're in lobby/join screens, canvas can block button clicks.
+  // Disable canvas pointer events until the actual game is active.
+  if (canvas) canvas.style.pointerEvents = enabled ? "auto" : "none";
+}
+
+// Default: lobby UI active, block canvas clicks
+setCanvasInteractivity(false);
+
+// Make network globally accessible for debugging
+window.network = network;
+
 // Set up auto-rejoin callback
+let suspendAutoRejoin = false;
+
 network.onAutoRejoin = function (res) {
+  if (suspendAutoRejoin) return;
+
   const name = localStorage.getItem("ludoLastName") || "Player";
   isHost = !!res.isHost;
   if (res.playerCount) selectedCount = res.playerCount;
@@ -94,9 +110,8 @@ let teamUpMode = false;
 // ═══════════════════════════════════════════
 if (playerCountRow) {
   playerCountRow.querySelectorAll(".count-btn").forEach((btn) => {
-    // Use pointerdown for immediate response on mobile/desktop
-    btn.addEventListener("pointerdown", (e) => {
-      // For mobile, pointerdown is faster than click
+    btn.addEventListener("click", (e) => {
+      e.preventDefault();
       const count = parseInt(btn.dataset.count);
       if (isNaN(count)) return;
 
@@ -108,6 +123,35 @@ if (playerCountRow) {
         .querySelectorAll(".count-btn")
         .forEach((b) => b.classList.remove("active"));
       btn.classList.add("active");
+
+      // ✅ CRITICAL: Enable all buttons when count changes
+      if (btnStart) {
+        btnStart.disabled = false;
+        btnStart.style.opacity = "1";
+        btnStart.style.pointerEvents = "auto";
+        btnStart.style.cursor = "pointer";
+      }
+      if (btnVsComputer) {
+        btnVsComputer.disabled = false;
+        btnVsComputer.style.opacity = "1";
+        btnVsComputer.style.pointerEvents = "auto";
+      }
+
+      // ✅ DEBUG LOGS
+      console.log("=== AFTER COUNT CHANGE ===");
+      console.log("selectedCount:", selectedCount);
+      console.log("btnStart.disabled:", btnStart?.disabled);
+      console.log(
+        "btnStart pointer-events:",
+        getComputedStyle(btnStart).pointerEvents,
+      );
+      console.log("btnStart opacity:", getComputedStyle(btnStart).opacity);
+      console.log(
+        "btnStart visibility:",
+        getComputedStyle(btnStart).visibility,
+      );
+      console.log("btnStart.style.display:", btnStart?.style?.display);
+      console.log("btnVsComputer.disabled:", btnVsComputer?.disabled);
 
       // Update Team Up visibility based on player count (only for 4 players)
       const teamUpBtn = document.getElementById("btnTeamUp");
@@ -122,18 +166,41 @@ if (playerCountRow) {
       }
     });
   });
+
+  // ✅ Initialize: Set 2P as default active button on page load
+  const defaultBtn = playerCountRow.querySelector('[data-count="2"]');
+  if (defaultBtn) {
+    defaultBtn.classList.add("active");
+  }
+}
+
+// ✅ Initialize: Ensure all buttons are enabled on page load
+if (btnStart) {
+  btnStart.disabled = false;
+  btnStart.style.opacity = "1";
+  btnStart.style.pointerEvents = "auto";
+  btnStart.style.cursor = "pointer";
+}
+if (btnVsComputer) {
+  btnVsComputer.disabled = false;
+  btnVsComputer.style.opacity = "1";
+  btnVsComputer.style.pointerEvents = "auto";
+  btnVsComputer.style.cursor = "pointer";
 }
 
 // Team Up Toggle
 const btnTeamUp = document.getElementById("btnTeamUp");
-btnTeamUp.addEventListener("click", () => {
-  teamUpMode = !teamUpMode;
-  updateTeamUpBtnUI();
-});
-
 function updateTeamUpBtnUI() {
+  if (!btnTeamUp) return;
   btnTeamUp.textContent = teamUpMode ? "✅ TEAM UP ON" : "👥 TEAM UP";
   btnTeamUp.style.background = teamUpMode ? "#28A33E" : "#3A1060";
+}
+if (btnTeamUp) {
+  btnTeamUp.addEventListener("click", () => {
+    teamUpMode = !teamUpMode;
+    updateTeamUpBtnUI();
+  });
+  updateTeamUpBtnUI();
 }
 
 // ═══════════════════════════════════════════
@@ -153,6 +220,172 @@ function showPopup(el) {
 }
 function hidePopup(el) {
   el.classList.add("hidden");
+}
+
+function generateRoomCode(count) {
+  const prefix = count === 2 ? "2P" : count === 3 ? "3P" : "4P";
+  const randomSuffix = Array.from({ length: 5 }, () =>
+    Math.random().toString(36).substring(2, 3).toUpperCase(),
+  ).join("");
+  return `${prefix}-${randomSuffix}`;
+}
+
+const LobbyComponent = {
+  updateTable(roomCode, players, isHost) {
+    displayTableCode.textContent = roomCode;
+    updateWaitSlots(players);
+    if (isHost) {
+      btnStartGame.classList.remove("hidden");
+      waitP.classList.add("hidden");
+      this.updateStartButton(players.length === selectedCount);
+    } else {
+      btnStartGame.classList.add("hidden");
+      waitP.classList.remove("hidden");
+    }
+  },
+
+  updateStartButton(enabled) {
+    btnStartGame.disabled = !enabled;
+    btnStartGame.textContent = enabled
+      ? "▶ START GAME"
+      : `Waiting for ${Math.max(0, selectedCount - slotsContainer.querySelectorAll(".player-slot:not(.empty)").length)} more...`;
+  },
+};
+
+function handlePlayWithFriends() {
+  if (btnStart.disabled) return;
+  suspendAutoRejoin = true;
+  setCanvasInteractivity(false);
+
+  const name = playerNameInput.value.trim() || "Player";
+  localStorage.setItem("ludoLastName", name);
+
+  joinError.classList.add("hidden");
+  btnStart.disabled = true;
+  btnStart.textContent = "⏳ Creating...";
+
+  // 8 second timeout — agar server respond na kare
+  const timeout = setTimeout(() => {
+    btnStart.disabled = false;
+    btnStart.textContent = "▶ PLAY WITH FRIENDS";
+    joinError.textContent = "Server respond nahi kar raha. Page reload karein.";
+    joinError.classList.remove("hidden");
+  }, 8000);
+
+  network.createRoom(name, selectedCount, teamUpMode, (res) => {
+    clearTimeout(timeout);
+    btnStart.disabled = false;
+    btnStart.textContent = "▶ PLAY WITH FRIENDS";
+
+    if (!res?.success) {
+      joinError.textContent = res?.error || "Room create nahi ho saka.";
+      joinError.classList.remove("hidden");
+      return;
+    }
+
+    selectedCount = Number(res.playerCount) || selectedCount;
+    if (selectedCount !== 4) teamUpMode = false;
+
+    document.querySelectorAll(".count-btn").forEach((b) => {
+      b.classList.toggle("active", Number(b.dataset.count) === selectedCount);
+    });
+
+    enterWaitingRoom(res.roomId, name, true);
+    LobbyComponent.updateStartButton(false);
+  });
+}
+
+function simulateMockJoiners(playerCount, hostName) {
+  const mockNames = ["Mira", "Rohan", "Anya", "Sahil"];
+  const activeColors = getLocalActivePlayerColors(playerCount);
+  const players = [{ name: hostName, color: activeColors[0], isYou: true }];
+  for (let i = 1; i < playerCount; i += 1) {
+    setTimeout(() => {
+      players.push({
+        name: mockNames[i - 1] || `Friend ${i + 1}`,
+        color: activeColors[i],
+        isYou: false,
+      });
+      updateWaitSlots([...players]);
+      if (players.length === playerCount) {
+        LobbyComponent.updateStartButton(true);
+      }
+    }, 600 * i);
+  }
+}
+
+function getLocalActivePlayerColors(count) {
+  if (count === 2) return [0, 2];
+  if (count === 3) return [0, 1, 2];
+  return [0, 1, 2, 3];
+}
+
+function buildLocalGameState(playerCount) {
+  return {
+    tokens: Array.from({ length: 4 }, (_, p) =>
+      Array.from({ length: 4 }, (_, i) => ({
+        player: p,
+        index: i,
+        steps: 0,
+        finished: false,
+        inHome: true,
+        lapCount: 0,
+      })),
+    ),
+    currentPlayer: 2,
+    rollQueue: [],
+    gameState: "roll",
+    pendingJunction: null,
+    winner: null,
+    playerCount,
+    rollSeq: 0,
+    lastRoll: null,
+  };
+}
+
+function startLocalGame(playerCount) {
+  selectedCount = playerCount;
+  const name = playerNameInput.value.trim() || "Player";
+  localStorage.setItem("ludoLastName", name);
+
+  setCanvasInteractivity(true);
+
+  const activeColors = getLocalActivePlayerColors(playerCount);
+  network.playerColor = activeColors[0];
+  game.clientPlayer = activeColors[0];
+
+  const state = buildLocalGameState(playerCount);
+  game.syncState(state);
+  game.activePlayerColors = activeColors;
+  game.gameState = state.gameState;
+  game.currentPlayer = state.currentPlayer;
+  game.winner = null;
+  game.rollQueue = [];
+
+  hidePopup(joinPopup);
+  hidePopup(friendsPopup);
+  inviteBanner.classList.add("hidden");
+  lobbyScreen.classList.add("hidden");
+  lobbyScreen.classList.remove("active");
+  waitingRoom.classList.add("hidden");
+  waitingRoom.classList.remove("active");
+
+  PLAYER_NAMES[2] = name;
+  game.avatars.forEach((avatar, idx) => {
+    if (idx === 2) {
+      avatar.name = name;
+      avatar.botEnabled = false;
+      avatar.isOnline = true;
+    } else if (game.isActivePlayer(idx)) {
+      avatar.name = `BOT ${idx + 1}`;
+      avatar.botEnabled = true;
+      avatar.isOnline = false;
+    } else {
+      avatar.name = "";
+      avatar.botEnabled = false;
+      avatar.isOnline = false;
+    }
+  });
 }
 
 function isVisible(el) {
@@ -186,11 +419,41 @@ function returnToMainMenu() {
   network.leaveRoom();
   isHost = false;
 
-  // Reset button state
+  // ✅ RESET selectedCount and player count UI
+  selectedCount = 2;
+  teamUpMode = false;
+
+  // Reset active button styling
+  if (playerCountRow) {
+    playerCountRow.querySelectorAll(".count-btn").forEach((b) => {
+      b.classList.remove("active");
+    });
+    // Set 2P as active by default
+    const twoPlayerBtn = playerCountRow.querySelector('[data-count="2"]');
+    if (twoPlayerBtn) {
+      twoPlayerBtn.classList.add("active");
+    }
+  }
+
+  // Reset Team Up button
+  const teamUpBtn = document.getElementById("btnTeamUp");
+  if (teamUpBtn) {
+    teamUpBtn.classList.add("hidden");
+    updateTeamUpBtnUI();
+  }
+
+  // Reset button states
   btnStart.disabled = false;
   btnStart.textContent = "▶ PLAY WITH FRIENDS";
   btnStart.style.opacity = "1";
   btnStart.style.transform = "";
+  btnStart.style.pointerEvents = "auto";
+
+  if (btnVsComputer) {
+    btnVsComputer.disabled = false;
+    btnVsComputer.style.opacity = "1";
+    btnVsComputer.style.pointerEvents = "auto";
+  }
 
   showScreen(lobbyScreen);
 }
@@ -221,127 +484,118 @@ function confirmBackNavigation() {
   }
 }
 
-btnBack.addEventListener("click", showBackConfirm);
-btnBackNo.addEventListener("click", hideBackConfirm);
-btnBackYes.addEventListener("click", confirmBackNavigation);
+if (btnBack) btnBack.addEventListener("click", showBackConfirm);
+if (btnBackNo) btnBackNo.addEventListener("click", hideBackConfirm);
+if (btnBackYes) btnBackYes.addEventListener("click", confirmBackNavigation);
 
 // ═══════════════════════════════════════════
 //  LOBBY — START
 // ═══════════════════════════════════════════
-const handleStartAction = (e) => {
-  if (e) {
-    e.preventDefault();
-    e.stopPropagation();
-  }
-  if (btnStart.disabled) return;
+function openJoinPopup() {
+  joinError.classList.add("hidden");
+  joinCodeInput.value = "";
+  showPopup(joinPopup);
+  setTimeout(() => joinCodeInput.focus(), 100);
+}
 
-  const name = playerNameInput.value.trim() || "Host";
-  localStorage.setItem("ludoLastName", name);
+function bindStartButton() {
+  if (!btnStart) return;
 
-  // Immediate visual feedback (Loading State)
-  btnStart.disabled = true;
-  btnStart.textContent = "⏳ Creating Room...";
-  btnStart.style.opacity = "0.7";
-  btnStart.style.transform = "scale(0.98)";
+  // click capture: ensures handler runs even if something else is intercepting in bubble phase
+  btnStart.addEventListener(
+    "click",
+    (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      handlePlayWithFriends();
+    },
+    true, // capture
+  );
 
-  window.debugLog(`Attempting to create room: ${selectedCount} players`);
+  // touchend fallback (mobile)
+  btnStart.addEventListener(
+    "touchend",
+    (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      handlePlayWithFriends();
+    },
+    { capture: true, passive: false },
+  );
+}
 
-  network.createRoom(name, selectedCount, teamUpMode, (res) => {
-    if (res.success) {
-      window.debugLog(`Room created: ${res.roomId}`);
-      isHost = true;
-      if (res.playerCount) selectedCount = res.playerCount;
-      enterWaitingRoom(res.roomId, name, true);
-    } else {
-      window.debugLog(`Room creation failed: ${res.error}`, "error");
-      btnStart.disabled = false;
-      btnStart.textContent = "▶ PLAY WITH FRIENDS";
-      btnStart.style.opacity = "1";
-      btnStart.style.transform = "";
-      alert("Failed to create room: " + (res.error || "Unknown error"));
-    }
-  });
-};
+bindStartButton();
 
-btnStart.addEventListener("pointerup", (e) => {
-  if (e.pointerType === "mouse" && e.button !== 0) return;
-  e.preventDefault();
-  handleStartAction(e);
-});
+// Inline onclick fallback in index.html
+window.__ludoStart = handlePlayWithFriends;
 
 // ═══════════════════════════════════════════
 //  LOBBY — VS COMPUTER
 // ═══════════════════════════════════════════
 const btnVsComputer = document.getElementById("btnVsComputer");
-btnVsComputer.addEventListener("click", () => {
-  const name = playerNameInput.value.trim() || "Player";
-  localStorage.setItem("ludoLastName", name);
-  btnVsComputer.disabled = true;
-  btnVsComputer.textContent = "⏳ Loading…";
-
-  // Create a 2-player room and start it after the server has registered the room
-  network.createRoom(name, 2, false, (res) => {
-    btnVsComputer.disabled = false;
-    btnVsComputer.textContent = "🤖 VS COMPUTER";
-    if (!res.success) {
-      window.debugLog(
-        `VS COMPUTER room creation failed: ${res.error}`,
-        "error",
-      );
-      return;
-    }
-
-    window.debugLog(`VS COMPUTER room created: ${res.roomId}`);
-    isHost = true;
-
-    // Give socket.io a moment so room/start-game ordering is consistent
-    setTimeout(() => {
-      network.startGame();
-      window.debugLog("StartGame command sent for VS COMPUTER");
-    }, 500);
+if (btnVsComputer) {
+  btnVsComputer.addEventListener("click", () => {
+    const name = playerNameInput.value.trim() || "Player";
+    localStorage.setItem("ludoLastName", name);
+    startLocalGame(selectedCount);
   });
-});
+}
 
 // ═══════════════════════════════════════════
 //  LOBBY — JOIN (open popup)
 // ═══════════════════════════════════════════
-btnOpenJoin.addEventListener("click", () => {
-  joinError.classList.add("hidden");
-  joinCodeInput.value = "";
-  showPopup(joinPopup);
-  setTimeout(() => joinCodeInput.focus(), 100);
-});
-btnCloseJoin.addEventListener("click", () => hidePopup(joinPopup));
+if (btnOpenJoin) btnOpenJoin.addEventListener("click", openJoinPopup);
+if (btnCloseJoin)
+  btnCloseJoin.addEventListener("click", () => hidePopup(joinPopup));
 
-btnConfirmJoin.addEventListener("click", attemptJoin);
-joinCodeInput.addEventListener("keydown", (e) => {
-  if (e.key === "Enter") attemptJoin();
-});
+if (btnConfirmJoin) btnConfirmJoin.addEventListener("click", attemptJoin);
+if (joinCodeInput)
+  joinCodeInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") attemptJoin();
+  });
 
 function attemptJoin() {
+  // Prevent auto-rejoin overwriting selectedCount during manual actions
+  suspendAutoRejoin = true;
+
   const code = joinCodeInput.value.trim().toUpperCase();
-  if (!code) return;
+  if (!code) {
+    joinError.textContent = "Please enter a room code to continue.";
+    joinError.classList.remove("hidden");
+    return;
+  }
+
   const name = playerNameInput.value.trim() || "Player";
   localStorage.setItem("ludoLastName", name);
   joinError.classList.add("hidden");
   btnConfirmJoin.disabled = true;
   btnConfirmJoin.textContent = "Joining…";
 
+  if (!network.socket || !network.socket.connected) {
+    btnConfirmJoin.disabled = false;
+    btnConfirmJoin.textContent = "Join Table";
+    joinError.textContent = "Socket disconnected. Please reload and try again.";
+    joinError.classList.remove("hidden");
+    return;
+  }
+
   network.joinRoom(code, name, (res) => {
     btnConfirmJoin.disabled = false;
     btnConfirmJoin.textContent = "Join Table";
+
     if (res.success) {
       hidePopup(joinPopup);
       isHost = !!res.isHost;
       if (res.playerCount) selectedCount = res.playerCount;
+
+      // Show waiting room; server room-update will fill slots
       enterWaitingRoom(code, name, isHost);
+
       if (res.state && res.state.gameState !== "lobby") {
-        // Reconnected to an active game → skip waiting room
         game.startGameFromServer(res.state);
       }
     } else {
-      joinError.textContent =
-        res.error || "Code not found. Check and try again.";
+      joinError.textContent = res.error || "Room not found";
       joinError.classList.remove("hidden");
     }
   });
@@ -356,8 +610,12 @@ let waitSlots = []; // array of { name, colorIndex, isYou }
 
 function enterWaitingRoom(roomCode, myName, host) {
   isHost = host;
+  game.gameState = "lobby";
   displayTableCode.textContent = roomCode;
   showScreen(waitingRoom);
+
+  // Waiting room should still block canvas clicks (no board interaction yet)
+  setCanvasInteractivity(false);
 
   if (host) {
     btnStartGame.classList.remove("hidden");
@@ -368,10 +626,15 @@ function enterWaitingRoom(roomCode, myName, host) {
   }
 
   // Register this user globally with server for direct invites
-  network.registerUser(myName);
+  if (network.socket && network.socket.connected) {
+    network.registerUser(myName);
+  }
 
   // Store in friends → they'll see us as online
   updateWaitSlots([{ name: myName, color: network.playerColor, isYou: true }]);
+  if (host) {
+    LobbyComponent.updateStartButton(false);
+  }
 }
 
 /** Called by network when room-update fires */
@@ -405,7 +668,16 @@ game.updateLobbyPlayers = function (data) {
       filled: true,
     }));
 
-    updateWaitSlots(slots);
+    const paddedSlots = [...slots];
+    while (paddedSlots.length < totalNeeded) {
+      paddedSlots.push({ empty: true });
+    }
+    updateWaitSlots(paddedSlots);
+
+    if (isHost) {
+      const ready = players.length === totalNeeded;
+      LobbyComponent.updateStartButton(ready);
+    }
   }
 
   // Auto-save any new friends
@@ -419,7 +691,9 @@ game.updateLobbyPlayers = function (data) {
   if (
     isHost &&
     players.length === selectedCount &&
-    game.gameState === "lobby"
+    game.gameState === "lobby" &&
+    network.socket &&
+    network.socket.connected
   ) {
     setTimeout(() => network.startGame(), 800);
   }
@@ -463,38 +737,47 @@ function updateWaitSlots(slots) {
 }
 
 // Copy code
-btnCopyCode.addEventListener("click", () => {
-  const code = displayTableCode.textContent;
-  navigator.clipboard.writeText(code).then(() => {
-    copyConfirm.classList.remove("hidden");
-    setTimeout(() => copyConfirm.classList.add("hidden"), 1800);
+if (btnCopyCode && displayTableCode) {
+  btnCopyCode.addEventListener("click", () => {
+    const code = displayTableCode.textContent;
+    navigator.clipboard.writeText(code).then(() => {
+      copyConfirm?.classList.remove("hidden");
+      setTimeout(() => copyConfirm?.classList.add("hidden"), 1800);
+    });
   });
-});
+}
 
 // Share
-btnShare.addEventListener("click", () => {
-  const code = displayTableCode.textContent;
-  const url = `${location.origin}?join=${code}`;
-  if (navigator.share) {
-    navigator.share({
-      title: "Join my Ludo table!",
-      text: `Use code: ${code}`,
-      url,
-    });
-  } else {
-    navigator.clipboard.writeText(`Join my Ludo table! Code: ${code}\n${url}`);
-    copyConfirm.textContent = "Link copied!";
-    copyConfirm.classList.remove("hidden");
-    setTimeout(() => {
-      copyConfirm.classList.add("hidden");
-      copyConfirm.textContent = "Copied!";
-    }, 1800);
-  }
-});
+if (btnShare && displayTableCode)
+  btnShare.addEventListener("click", () => {
+    const code = displayTableCode.textContent;
+    const url = `${location.origin}?join=${code}`;
+    if (navigator.share) {
+      navigator.share({
+        title: "Join my Ludo table!",
+        text: `Use code: ${code}`,
+        url,
+      });
+    } else {
+      navigator.clipboard.writeText(
+        `Join my Ludo table! Code: ${code}\n${url}`,
+      );
+      copyConfirm.textContent = "Link copied!";
+      copyConfirm?.classList.remove("hidden");
+      setTimeout(() => {
+        copyConfirm.classList.add("hidden");
+        copyConfirm.textContent = "Copied!";
+      }, 1800);
+    }
+  });
 
 // Host: manual start
 btnStartGame.addEventListener("click", () => {
-  network.startGame();
+  if (network.socket && network.socket.connected) {
+    network.startGame();
+  } else {
+    startLocalGame(selectedCount);
+  }
 });
 
 // ═══════════════════════════════════════════
@@ -530,13 +813,17 @@ function addFriend(name, colorIndex, uuid) {
 }
 
 // Open friends popup
-btnInviteFriends.addEventListener("click", () => {
-  renderFriendsList();
-  showPopup(friendsPopup);
-});
-btnCloseFriends.addEventListener("click", () => hidePopup(friendsPopup));
+if (btnInviteFriends) {
+  btnInviteFriends.addEventListener("click", () => {
+    renderFriendsList();
+    showPopup(friendsPopup);
+  });
+}
+if (btnCloseFriends)
+  btnCloseFriends.addEventListener("click", () => hidePopup(friendsPopup));
 
-friendSearchInput.addEventListener("input", renderFriendsList);
+if (friendSearchInput)
+  friendSearchInput.addEventListener("input", renderFriendsList);
 
 function renderFriendsList(onlineSessions) {
   const q = (friendSearchInput.value || "").trim().toLowerCase();
@@ -689,6 +976,8 @@ game.startGameFromServer = function (state) {
   game.clientPlayer = network.playerColor;
   game.syncState(state);
   game.gameState = state.gameState;
+
+  setCanvasInteractivity(true);
 };
 
 // Redundant startGame was removed. Direct calls to game.startGameFromServer are used instead.
@@ -1001,61 +1290,11 @@ function isEventInsideChatUI(e) {
 }
 
 canvas.addEventListener(
-  "pointerdown",
+  "click",
   (e) => {
-    // If chat input is active, don't let the canvas handler swallow the tap that should focus the input.
+    // If chat input is active, don't let the canvas handler swallow the click that should focus the input.
     if (game?.chat?.active && isEventInsideChatUI(e)) return;
     handleInput(e);
-  },
-  { passive: false },
-);
-
-// Add explicit touch event listeners for better mobile support
-canvas.addEventListener(
-  "touchstart",
-  (e) => {
-    // Ensure touches are handled like pointer events
-    if (game?.chat?.active && isEventInsideChatUI(e)) return;
-    // Prevent default only on canvas touches (not on inputs)
-    if (e.target === canvas) {
-      e.preventDefault();
-    }
-    handleInput(e);
-  },
-  { passive: false },
-);
-
-canvas.addEventListener(
-  "touchmove",
-  (e) => {
-    // Prevent default scrolling on canvas touches
-    if (e.target === canvas) {
-      e.preventDefault();
-    }
-  },
-  { passive: false },
-);
-
-canvas.addEventListener(
-  "touchend",
-  (e) => {
-    if (e.target === canvas) {
-      e.preventDefault();
-    }
-  },
-  { passive: false },
-);
-
-// Prevent double-tap zoom on mobile
-let lastTouchEnd = 0;
-canvas.addEventListener(
-  "touchend",
-  (e) => {
-    const now = Date.now();
-    if (now - lastTouchEnd <= 300 && e.touches.length === 0) {
-      e.preventDefault();
-    }
-    lastTouchEnd = now;
   },
   { passive: false },
 );
