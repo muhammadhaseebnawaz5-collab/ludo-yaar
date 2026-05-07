@@ -63,7 +63,12 @@ io.on("connection", (socket) => {
 
   // Creates a new room
   socket.on("create-room", ({ name, count, teamUpMode }, callback) => {
-    const roomId = Math.random().toString(36).substring(2, 8).toUpperCase();
+    // Generate a robust 6-digit alphanumeric code
+    const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    let roomId = "";
+    for (let i = 0; i < 6; i++) {
+      roomId += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
     const sessionId = randomUUID();
 
     const room = new LudoRoom(

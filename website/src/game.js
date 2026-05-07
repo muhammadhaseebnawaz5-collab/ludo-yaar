@@ -544,7 +544,23 @@ export class LudoGame {
       );
     }
 
-    if (this.emojiPanel.visible) this.emojiPanel.draw(ctx, 20, 520);
+    if (this.emojiPanel.visible) {
+      const myAvatar = this.avatars[this.clientPlayer];
+      const { cols, pad, size, rows } = this.emojiPanel.getEmojiGridBounds(
+        0,
+        0,
+      );
+      const panelWidth = cols * (size + pad) + pad;
+      const panelHeight = rows * (size + pad) + pad;
+      const avatarX = myAvatar?.position?.[0] ?? SCREEN_W / 2;
+      const avatarY = myAvatar?.position?.[1] ?? SCREEN_H - 80;
+
+      let px = avatarX - panelWidth / 2;
+      let py = avatarY - panelHeight - 16;
+      px = Math.min(Math.max(20, px), SCREEN_W - panelWidth - 20);
+      py = Math.max(20, py);
+      this.emojiPanel.draw(ctx, px, py);
+    }
 
     if (this.winner !== null) this.drawWinnerScreen(ctx);
   }

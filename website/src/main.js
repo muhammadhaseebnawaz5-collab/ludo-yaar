@@ -92,25 +92,37 @@ let teamUpMode = false;
 // ═══════════════════════════════════════════
 //  PLAYER COUNT SELECTION
 // ═══════════════════════════════════════════
-playerCountRow.querySelectorAll(".count-btn").forEach((btn) => {
-  btn.addEventListener("click", () => {
-    playerCountRow
-      .querySelectorAll(".count-btn")
-      .forEach((b) => b.classList.remove("active"));
-    btn.classList.add("active");
-    selectedCount = parseInt(btn.dataset.count);
+if (playerCountRow) {
+  playerCountRow.querySelectorAll(".count-btn").forEach((btn) => {
+    // Use pointerdown for immediate response on mobile/desktop
+    btn.addEventListener("pointerdown", (e) => {
+      // For mobile, pointerdown is faster than click
+      const count = parseInt(btn.dataset.count);
+      if (isNaN(count)) return;
 
-    // Update Team Up visibility based on player count (only for 4 players)
-    const teamUpBtn = document.getElementById("btnTeamUp");
-    if (selectedCount === 4) {
-      teamUpBtn.classList.remove("hidden");
-    } else {
-      teamUpBtn.classList.add("hidden");
-      teamUpMode = false;
-      updateTeamUpBtnUI();
-    }
+      selectedCount = count;
+      window.debugLog?.(`Selected ${selectedCount} players`);
+
+      // Update UI active state
+      playerCountRow
+        .querySelectorAll(".count-btn")
+        .forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+
+      // Update Team Up visibility based on player count (only for 4 players)
+      const teamUpBtn = document.getElementById("btnTeamUp");
+      if (teamUpBtn) {
+        if (selectedCount === 4) {
+          teamUpBtn.classList.remove("hidden");
+        } else {
+          teamUpBtn.classList.add("hidden");
+          teamUpMode = false;
+          updateTeamUpBtnUI();
+        }
+      }
+    });
   });
-});
+}
 
 // Team Up Toggle
 const btnTeamUp = document.getElementById("btnTeamUp");
@@ -173,6 +185,13 @@ function returnToMainMenu() {
 
   network.leaveRoom();
   isHost = false;
+
+  // Reset button state
+  btnStart.disabled = false;
+  btnStart.textContent = "▶ PLAY WITH FRIENDS";
+  btnStart.style.opacity = "1";
+  btnStart.style.transform = "";
+
   showScreen(lobbyScreen);
 }
 
@@ -209,15 +228,25 @@ btnBackYes.addEventListener("click", confirmBackNavigation);
 // ═══════════════════════════════════════════
 //  LOBBY — START
 // ═══════════════════════════════════════════
-btnStart.addEventListener("click", () => {
+const handleStartAction = (e) => {
+  if (e) {
+    e.preventDefault();
+    e.stopPropagation();
+  }
+  if (btnStart.disabled) return;
+
   const name = playerNameInput.value.trim() || "Host";
-  localStorage.setItem("ludoLastName", name); // Persist for refresh
+  localStorage.setItem("ludoLastName", name);
+
+  // Immediate visual feedback (Loading State)
   btnStart.disabled = true;
-  btnStart.textContent = "⏳ Creating…";
+  btnStart.textContent = "⏳ Creating Room...";
+  btnStart.style.opacity = "0.7";
+  btnStart.style.transform = "scale(0.98)";
+
+  window.debugLog(`Attempting to create room: ${selectedCount} players`);
 
   network.createRoom(name, selectedCount, teamUpMode, (res) => {
-    btnStart.disabled = false;
-    btnStart.textContent = "▶ PLAY WITH FRIENDS";
     if (res.success) {
       window.debugLog(`Room created: ${res.roomId}`);
       isHost = true;
@@ -225,8 +254,19 @@ btnStart.addEventListener("click", () => {
       enterWaitingRoom(res.roomId, name, true);
     } else {
       window.debugLog(`Room creation failed: ${res.error}`, "error");
+      btnStart.disabled = false;
+      btnStart.textContent = "▶ PLAY WITH FRIENDS";
+      btnStart.style.opacity = "1";
+      btnStart.style.transform = "";
+      alert("Failed to create room: " + (res.error || "Unknown error"));
     }
   });
+};
+
+btnStart.addEventListener("pointerup", (e) => {
+  if (e.pointerType === "mouse" && e.button !== 0) return;
+  e.preventDefault();
+  handleStartAction(e);
 });
 
 // ═══════════════════════════════════════════
@@ -917,12 +957,19 @@ function handleInput(e) {
   game.handleTokenClick(lx, ly);
 
   if (game.emojiPanel.visible) {
-    const eyBase = 520,
-      exBase = 20;
-    const { cols, pad, size, rows } = game.emojiPanel.getEmojiGridBounds(
-      exBase,
-      eyBase,
-    );
+    const myAvatar =
+      game.avatars[network.playerColor] || game.avatars[game.clientPlayer];
+    const { cols, pad, size, rows } = game.emojiPanel.getEmojiGridBounds(0, 0);
+    const panelWidth = cols * (size + pad) + pad;
+    const panelHeight = rows * (size + pad) + pad;
+    const avatarX = myAvatar?.position?.[0] ?? SCREEN_W / 2;
+    const avatarY = myAvatar?.position?.[1] ?? SCREEN_H - 80;
+
+    let exBase = avatarX - panelWidth / 2;
+    let eyBase = avatarY - panelHeight - 16;
+    exBase = Math.min(Math.max(20, exBase), SCREEN_W - panelWidth - 20);
+    eyBase = Math.max(20, eyBase);
+
     for (let i = 0; i < game.emojiPanel.emojis.length; i++) {
       const ex = exBase + pad + (i % cols) * (size + pad) + size / 2;
       const ey = eyBase + pad + Math.floor(i / cols) * (size + pad) + size / 2;
@@ -932,7 +979,6 @@ function handleInput(e) {
         Math.abs(sy - ey) < size / 2 + 10
       ) {
         const emoji = game.emojiPanel.emojis[i];
-        const myAvatar = game.avatars[network.playerColor];
         if (myAvatar) {
           myAvatar.setEmoji(emoji, 120);
         }

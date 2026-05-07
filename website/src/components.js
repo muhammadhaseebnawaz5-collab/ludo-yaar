@@ -370,44 +370,9 @@ export class ChatSystem {
       ctx.fillRect(trackX, thumbY, 6, thumbHeight);
     }
 
-    // Quick chat phrases
-    const quickY = contentTop + contentHeight + 12;
-    ctx.fillStyle = "rgba(255,255,255,0.72)";
-    ctx.font = "bold 11px Arial";
-    ctx.textAlign = "left";
-    ctx.fillText("QUICK CHAT", x + 14, quickY);
-
-    this.phraseRects = [];
-    const phraseW = (w - 34) / 2;
-    const phraseH = 34;
-    this.quickPhrases.forEach((phrase, i) => {
-      const px = x + 10 + (i % 2) * (phraseW + 10);
-      const py = quickY + 10 + Math.floor(i / 2) * (phraseH + 8);
-      this.phraseRects.push({
-        x: px,
-        y: py,
-        w: phraseW,
-        h: phraseH,
-        value: phrase,
-      });
-
-      ctx.fillStyle = "rgba(255,255,255,0.12)";
-      ctx.beginPath();
-      ctx.roundRect(px, py, phraseW, phraseH, 8);
-      ctx.fill();
-      ctx.strokeStyle = "rgba(255,255,255,0.18)";
-      ctx.lineWidth = 1;
-      ctx.stroke();
-
-      ctx.fillStyle = COLORS.WHITE;
-      ctx.font = "bold 13px Arial";
-      ctx.textAlign = "center";
-      ctx.fillText(phrase, px + phraseW / 2, py + 22);
-    });
-
     // Emoji bar
     this.emojiRects = [];
-    const emojiY = quickY + 10 + 3 * (phraseH + 8) + 8;
+    const emojiY = contentTop + contentHeight + 12;
     const emojiSize = 44;
     const emojiGap = 8;
     const emojiTotalW =
@@ -484,11 +449,6 @@ export class ChatSystem {
   }
 
   getQuickActionAt(px, py) {
-    const phrase = this.phraseRects.find(
-      (r) => px >= r.x && px <= r.x + r.w && py >= r.y && py <= r.y + r.h,
-    );
-    if (phrase) return phrase.value;
-
     const emoji = this.emojiRects.find(
       (r) => px >= r.x && px <= r.x + r.w && py >= r.y && py <= r.y + r.h,
     );
@@ -532,7 +492,7 @@ export class ProfileAvatar {
     this.avatarLayer.style.width = `${size}px`;
     this.avatarLayer.style.height = `${size}px`;
     this.avatarLayer.style.pointerEvents = "none";
-    this.avatarLayer.style.zIndex = "9999";
+    this.avatarLayer.style.zIndex = "10000";
     document.querySelector(".game-container").appendChild(this.avatarLayer);
 
     this.avatarContainer = document.createElement("div");
@@ -546,7 +506,7 @@ export class ProfileAvatar {
     this.emojiElement.style.position = "absolute";
     this.emojiElement.style.display = "none";
     this.emojiElement.style.pointerEvents = "none";
-    this.emojiElement.style.zIndex = "999";
+    this.emojiElement.style.zIndex = "10001";
     this.avatarContainer.appendChild(this.emojiElement);
 
     this.messageElement = document.createElement("div");
@@ -625,8 +585,24 @@ export class ProfileAvatar {
 
   setPosition(x, y) {
     this.position = [x, y];
-    this.avatarLayer.style.left = `${x - this.size / 2}px`;
-    this.avatarLayer.style.top = `${y - this.size / 2}px`;
+
+    const canvas = document.getElementById("gameCanvas");
+    const gameContainer = document.querySelector(".game-container");
+
+    if (canvas && gameContainer) {
+      const canvasRect = canvas.getBoundingClientRect();
+      const containerRect = gameContainer.getBoundingClientRect();
+      const scale = canvasRect.width / SCREEN_W;
+      const offsetX = canvasRect.left - containerRect.left;
+      const offsetY = canvasRect.top - containerRect.top;
+
+      this.avatarLayer.style.left = `${offsetX + x * scale - this.size / 2}px`;
+      this.avatarLayer.style.top = `${offsetY + y * scale - this.size / 2}px`;
+    } else {
+      this.avatarLayer.style.left = `${x - this.size / 2}px`;
+      this.avatarLayer.style.top = `${y - this.size / 2}px`;
+    }
+
     this.updatePopupPlacement(this.emojiElement, "emoji");
     this.updatePopupPlacement(this.messageElement, "message");
   }

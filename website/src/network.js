@@ -1,9 +1,20 @@
-import { io } from "socket.io-client";
-
 export class NetworkManager {
   constructor(gameInstance) {
     this.game = gameInstance;
-    this.socket = io();
+
+    // Use the global 'io' from the CDN script in index.html
+    if (typeof io !== "undefined") {
+      // In development, connect to localhost:3000; in production, use same origin
+      const socketUrl =
+        process.env.NODE_ENV === "development"
+          ? "http://localhost:3000"
+          : window.location.origin;
+      this.socket = io(socketUrl);
+    } else {
+      console.error(
+        "Socket.io not found! The game will not be able to connect to the server.",
+      );
+    }
 
     this.roomId = localStorage.getItem("ludoRoomId") || null;
     this.sessionId = localStorage.getItem("ludoSessionId") || null;
@@ -218,8 +229,8 @@ export class NetworkManager {
         this.playerColor = res.playerColor;
         localStorage.setItem("ludoRoomId", this.roomId);
         localStorage.setItem("ludoSessionId", this.sessionId);
-        callback(res);
       }
+      callback(res);
     });
   }
 

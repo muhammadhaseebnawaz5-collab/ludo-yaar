@@ -88,6 +88,9 @@ body {
   position: relative;
   width: 100%;
   height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   flex: 1 1 auto;
   transform: none;
   transform-origin: center center;
@@ -141,6 +144,7 @@ textarea,
 button,
 select {
   pointer-events: auto;
+  touch-action: manipulation;
 }
 
 .app-back-btn {
@@ -370,17 +374,21 @@ select {
 }
 .count-btn {
   flex: 1;
-  padding: 10px 0;
-  border-radius: var(--radius-sm);
+  padding: 14px 0;
+  min-height: 48px;
+  border-radius: var(--radius-md);
   border: 2px solid rgba(255, 255, 255, 0.25);
   background: rgba(255, 255, 255, 0.1);
   color: rgba(255, 255, 255, 0.7);
   font-family: var(--font);
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 800;
   letter-spacing: 0.5px;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 .count-btn:hover {
   background: rgba(255, 255, 255, 0.2);
@@ -1156,7 +1164,7 @@ select {
    EMOJI POP-UP
    ═══════════════════════════════════════════ */
 .avatar-container {
-  position: relative !important;
+  position: absolute;
   overflow: visible;
   z-index: 9999;
 }
@@ -1169,19 +1177,21 @@ select {
   font-size: 34px;
   pointer-events: none;
   z-index: 9999;
-  left: 50%;
-  transform: translateX(-50%);
+  /* Yeh element ko container ke center mein layega */
+  transform: translateX(-50%); /* Yeh exact pixel-perfect centering karega */
   opacity: 0;
 }
+/* Agar popup upar dikhana hai */
 .avatar-container.popup-above .avatar-emoji-popup {
-  bottom: calc(100% + 150px);
-  top: auto;
-  transform: translateX(-50%) translateY(-6px);
+  bottom: 100%; /* Bilkul avatar ke sar ke upar */
+
+  transform: translateX(-50%) translateY(-10px);
 }
+
 .avatar-container.popup-below .avatar-emoji-popup {
-  top: calc(100% + 150px);
-  bottom: auto;
-  transform: translateX(-50%) translateY(6px);
+  top: 100%; /* Bilkul avatar ke niche */
+
+  transform: translateX(-50%) translateY(10px);
 }
 .avatar-emoji-popup.show {
   opacity: 1;
@@ -1192,7 +1202,7 @@ select {
 
 .avatar-message-popup {
   position: absolute;
-  left: 50%;
+  left: 50% !important; /* Yeh element ko container ke center mein layega */
   transform: translateX(-50%) translateY(6px);
   min-width: 96px;
   max-width: 240px;
@@ -1215,14 +1225,15 @@ select {
   z-index: 9999;
 }
 .avatar-container.popup-above .avatar-message-popup {
-  bottom: calc(100% + 150px);
-  top: auto;
-  transform: translateX(-50%) translateY(6px);
+  bottom: 100%; /* Bilkul avatar ke sar ke upar */
+  left: 50%;
+  transform: translateX(-50%) translateY(-10px);
 }
+
 .avatar-container.popup-below .avatar-message-popup {
-  top: calc(100% + 150px);
-  bottom: auto;
-  transform: translateX(-50%) translateY(-6px);
+  top: 100%; /* Bilkul avatar ke niche */
+  left: 50%;
+  transform: translateX(-50%) translateY(10px);
 }
 .avatar-message-popup.show {
   opacity: 1;
