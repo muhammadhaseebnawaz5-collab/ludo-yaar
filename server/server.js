@@ -333,6 +333,10 @@ io.on("connection", (socket) => {
       const player = room.players.find((p) => p.socketId === socket.id);
       if (player) {
         room.disconnectPlayer(socket.id);
+        
+        // Notify others to cleanup WebRTC
+        socket.to(roomId).emit("peer-disconnected", { socketId: socket.id });
+
         io.to(roomId).emit("room-update", {
           playerCount: room.playerCount,
           players: room.players.map((p) => ({
@@ -343,8 +347,6 @@ io.on("connection", (socket) => {
             socketId: p.socketId,
           })),
         });
-
-        // Optional: Cleanup empty rooms after a few minutes
       }
     }
   });

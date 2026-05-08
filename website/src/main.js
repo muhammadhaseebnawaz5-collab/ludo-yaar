@@ -45,14 +45,25 @@ let suspendAutoRejoin = false;
 
 network.onAutoRejoin = function (res) {
   if (suspendAutoRejoin) return;
+  console.log("🔄 Re-joining room:", res.roomId);
 
   const name = localStorage.getItem("ludoLastName") || "Player";
   isHost = !!res.isHost;
   if (res.playerCount) selectedCount = res.playerCount;
+  
+  // Transition to waiting room
   enterWaitingRoom(res.roomId, name, isHost);
+  
   if (res.state && res.state.gameState !== "lobby") {
-    // Reconnected to an active game
+    console.log("🎮 Game in progress, restoring board...");
     game.startGameFromServer(res.state);
+    
+    // Make sure lobby and waiting room are hidden
+    lobbyScreen.classList.add("hidden");
+    lobbyScreen.classList.remove("active");
+    waitingRoom.classList.add("hidden");
+    waitingRoom.classList.remove("active");
+    setCanvasInteractivity(true);
   }
 };
 
@@ -67,6 +78,7 @@ const inviteBanner = document.getElementById("inviteBanner");
 
 const playerNameInput = document.getElementById("playerNameInput");
 const btnStart = document.getElementById("btnStart");
+const btnVsComputer = document.getElementById("btnVsComputer");
 const btnOpenJoin = document.getElementById("btnOpenJoin");
 const playerCountRow = document.getElementById("playerCountRow");
 
@@ -501,38 +513,37 @@ function openJoinPopup() {
 function bindStartButton() {
   if (!btnStart) return;
 
-  // click capture: ensures handler runs even if something else is intercepting in bubble phase
-  btnStart.addEventListener(
-    "click",
-    (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      handlePlayWithFriends();
-    },
-    true, // capture
-  );
+  // Simplified: single listener, no capture unless needed. 
+  // We use both click and touchend for maximum compatibility but with a debouncer.
+  let lastClickTime = 0;
+  const debouncedHandler = (e) => {
+    const now = Date.now();
+    if (now - lastClickTime < 500) return;
+    lastClickTime = now;
+    
+    console.log("🔘 Start button clicked/touched");
+    handlePlayWithFriends();
+  };
 
-  // touchend fallback (mobile)
-  btnStart.addEventListener(
-    "touchend",
-    (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      handlePlayWithFriends();
-    },
-    { capture: true, passive: false },
-  );
+  btnStart.addEventListener("click", debouncedHandler);
+  btnStart.addEventListener("touchend", (e) => {
+    // Prevent double fire with click
+    e.preventDefault(); 
+    debouncedHandler(e);
+  }, { passive: false });
 }
 
 bindStartButton();
 
-// Inline onclick fallback in index.html
-window.__ludoStart = handlePlayWithFriends;
+// Inline onclick fallback removed to avoid double-binding issues
+window.__ludoStart = () => {
+  console.log("🔗 __ludoStart triggered");
+  handlePlayWithFriends();
+};
 
 // ═══════════════════════════════════════════
 //  LOBBY — VS COMPUTER
 // ═══════════════════════════════════════════
-const btnVsComputer = document.getElementById("btnVsComputer");
 if (btnVsComputer) {
   btnVsComputer.addEventListener("click", () => {
     const name = playerNameInput.value.trim() || "Player";
@@ -709,7 +720,7 @@ function updateWaitSlots(slots) {
   slotsContainer.innerHTML = "";
   paddedSlots.forEach((slot) => {
     const div = document.createElement("div");
-    div.className = "player-slot";
+    div.className = "player-slot" + (slot.empty ? " empty" : "");
 
     const avatar = document.createElement("div");
     const label = document.createElement("div");
@@ -1356,3 +1367,40 @@ function loop() {
   requestAnimationFrame(loop);
 }
 loop();
+
+// ═══════════════════════════════════════════
+//  REFRESH RECOVERY / SESSION PERSISTENCE
+// ═══════════════════════════════════════════
+
+window.addEventListener("beforeunload", () => {
+  // Save current room and session for quick recovery on refresh
+  if (network.roomId && network.sessionId) {
+    localStorage.setItem("ludoRoomId", network.roomId);
+    localStorage.setItem("ludoSessionId", network.sessionId);
+  }
+  
+  if (playerNameInput) {
+    const name = playerNameInput.value.trim();
+    if (name) {
+      localStorage.setItem("ludoLastName", name);
+    }
+  }
+  
+  // Save player count so it's restored after refresh
+  localStorage.setItem("ludoLastSelectedCount", selectedCount);
+});
+
+// Restore previous player count if available
+const lastCount = localStorage.getItem("ludoLastSelectedCount");
+if (lastCount && [2, 3, 4].includes(Number(lastCount))) {
+  selectedCount = Number(lastCount);
+  document.querySelectorAll(".count-btn").forEach(btn => {
+    btn.classList.toggle("active", Number(btn.dataset.count) === selectedCount);
+  });
+}
+
+// Ensure player name is restored
+const lastPlayerName = localStorage.getItem("ludoLastName");
+if (lastPlayerName && playerNameInput) {
+  playerNameInput.value = lastPlayerName;
+}

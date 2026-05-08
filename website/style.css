@@ -53,6 +53,7 @@ body {
 
 /* ✅ Global hidden class — MUST be pointer-events: none */
 .hidden {
+  display: none !important;
   pointer-events: none !important;
   opacity: 0 !important;
 }
@@ -260,6 +261,7 @@ select {
 }
 
 .screen.hidden {
+  display: none !important;
   opacity: 0;
   pointer-events: none;
   transform: scale(0.97);
@@ -584,6 +586,7 @@ select {
   transition: opacity 0.25s;
 }
 .popup-overlay.hidden {
+  display: none !important;
   opacity: 0;
   pointer-events: none;
 }

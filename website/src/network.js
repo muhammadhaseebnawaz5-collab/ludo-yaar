@@ -3,18 +3,27 @@ export class NetworkManager {
     this.game = gameInstance;
 
     // Use the global 'io' from the CDN script in index.html
+    this.socket = null;
     if (typeof io !== "undefined") {
-      // In development, connect to localhost:3000; in production, use same origin
-      const socketUrl =
-        process.env.NODE_ENV === "development"
-          ? "http://localhost:3000"
-          : window.location.origin;
-      console.log("🔌 Attempting to connect to socket server:", socketUrl);
-      this.socket = io(socketUrl);
-      this.setupSocketEvents();
+      // In production (Railway), let Socket.io auto-detect the host.
+      // In dev, we might need an explicit URL if the frontend is on a different port.
+      const isDev =
+        typeof import.meta !== "undefined" &&
+        typeof import.meta.env !== "undefined" &&
+        import.meta.env.DEV;
+      
+      const socketUrl = isDev ? "http://localhost:3000" : undefined;
+      console.log("🔌 Connecting to socket server:", socketUrl || "Default (Same Origin)");
+      
+      this.socket = io(socketUrl, {
+        reconnection: true,
+        reconnectionAttempts: 10,
+        reconnectionDelay: 1000,
+        timeout: 20000,
+      });
     } else {
       console.error(
-        "❌ Socket.io not found! The game will not be able to connect to the server. Make sure the CDN script is loaded.",
+        "❌ Socket.io not found! The game will not be able to connect to the server.",
       );
     }
 
@@ -49,6 +58,8 @@ export class NetworkManager {
   }
 
   setupSocketEvents() {
+    if (!this.socket) return;
+
     this.socket.on("connect", () => {
       console.log("✅ WebSocket connected:", this.socket.id);
       const name = localStorage.getItem("ludoLastName") || "Player";
@@ -177,6 +188,11 @@ export class NetworkManager {
 
     this.socket.on("peer-voice-status", ({ sessionId, color, isMicOn }) => {
       this.game.updatePeerVoiceStatus(sessionId, color, isMicOn);
+    });
+
+    // Handle peer disconnecting for voice cleanup
+    this.socket.on("peer-disconnected", ({ socketId }) => {
+      this.cleanupPeerConnection(socketId);
     });
   }
 
@@ -366,45 +382,42 @@ export class NetworkManager {
   async toggleMic() {
     if (!this.localStream) {
       try {
+        console.log("🎤 Requesting microphone access...");
         this.localStream = await navigator.mediaDevices.getUserMedia({
           audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true,
+            echoCancellation: { ideal: true },
+            noiseSuppression: { ideal: true },
+            autoGainControl: { ideal: true },
           },
         });
+        
+        // Ensure tracks are enabled
         this.localStream.getAudioTracks().forEach((track) => {
           track.enabled = true;
+          console.log("✅ Audio track enabled:", track.label);
         });
-
-        // FIX: never play your own audio
-        const localAudio = new Audio();
-        localAudio.srcObject = this.localStream;
-        localAudio.muted = true;
-        localAudio.autoplay = true;
-        localAudio.playsInline = true;
-        this._localMutedAudioEl = localAudio;
 
         this.isMicOn = true;
         this.broadcastVoiceStatus();
+        
+        // Add tracks to any existing peers
         this.addLocalTracksToPeers();
+        
+        // If we have other people in the room, start connections with them
         Object.values(this.socketIds).forEach((sid) => {
-          if (sid !== this.socket.id && !this.peers[sid]) {
+          if (sid !== this.socket?.id && !this.peers[sid]) {
             this.createPeerConnection(sid, true);
           }
         });
       } catch (e) {
-        console.error("Mic access denied", e);
+        console.error("❌ Mic access denied or error:", e);
         return false;
       }
     } else {
       this.isMicOn = !this.isMicOn;
-      this.localStream.getAudioTracks()[0].enabled = this.isMicOn;
-
-      if (this._localMutedAudioEl) {
-        this._localMutedAudioEl.muted = true;
-        this._localMutedAudioEl.volume = 0;
-      }
+      this.localStream.getAudioTracks().forEach(track => {
+        track.enabled = this.isMicOn;
+      });
 
       this.broadcastVoiceStatus();
     }
@@ -522,21 +535,24 @@ export class NetworkManager {
     };
 
     pc.ontrack = (event) => {
-      let audio = this.remoteAudioEls[targetSocketId];
-      if (!audio) {
-        audio = new Audio();
-        audio.autoplay = true;
-        audio.playsInline = true;
-        audio.volume = 0.7;
-        audio.muted = false;
-        this.remoteAudioEls[targetSocketId] = audio;
-      }
+      console.log(`🎵 Received remote track from ${targetSocketId}`);
       const remoteStream = event.streams[0];
       if (!remoteStream) return;
 
-      if (audio.srcObject) return;
-      audio.srcObject = remoteStream;
-      this.applyRemoteAudioMuteState(targetSocketId);
+      let audio = this.remoteAudioEls[targetSocketId];
+      if (!audio) {
+        audio = document.createElement("audio");
+        audio.id = `audio-${targetSocketId}`;
+        audio.autoplay = true;
+        audio.playsInline = true;
+        // Don't append to body, but keep reference
+        this.remoteAudioEls[targetSocketId] = audio;
+      }
+
+      if (audio.srcObject !== remoteStream) {
+        audio.srcObject = remoteStream;
+        this.applyRemoteAudioMuteState(targetSocketId);
+      }
     };
 
     pc.oniceconnectionstatechange = () => {
