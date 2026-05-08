@@ -307,34 +307,46 @@ export class LudoRoom {
     });
 
     this.transitionTimer = setTimeout(() => {
-      this.state.rollQueue.push(val);
+      // 🎲 Count consecutive sixes for triple-six rule
       const sixCount = this.state.rollQueue.filter((v) => v === 6).length;
 
-      if (sixCount >= 3) {
-        // FIX: Teen 6 = rollQueue clear karke turn end
-        this.state.rollQueue = [];
-        this.nextTurn();
-        return;
-      }
-
       if (val === 6) {
-        // FIX: 6 aaya = "roll" state rehti hai, move bhi ho sakta hai (6 queue mein hai)
-        this.state.gameState = "roll";
+        // 🎲 TRIPLE SIX RULE: If this is the 3rd six, end turn immediately
+        if (sixCount >= 2) {
+          // Already have 2 sixes, this would be the 3rd
+          console.log(
+            `🚫 TRIPLE SIX! Player ${this.state.currentPlayer} turn ends.`,
+          );
+          this.state.rollQueue = [];
+          this.nextTurn();
+          return;
+        }
+
+        // Otherwise, add 6 to rollQueue and give another roll
+        this.state.rollQueue.push(val);
+        this.state.gameState = "roll"; // Stay in rolling phase
         this.broadcast("state-update", this.state);
         this.startTurnTimer();
         return;
-      }
-
-      // Normal roll = move phase
-      this.state.gameState = "move";
-
-      if (!this.canAnyMove()) {
-        setTimeout(() => this.nextTurn(), 800);
       } else {
-        this.broadcast("state-update", this.state);
-        this.startTurnTimer();
+        // 🎲 Non-6 rolled: End rolling phase, move to movement phase
+        this.state.rollQueue.push(val);
+
+        // Check if player has any valid moves
+        if (!this.canAnyMove()) {
+          // No moves available → end turn
+          console.log(
+            `🚫 No moves available for player ${this.state.currentPlayer}`,
+          );
+          setTimeout(() => this.nextTurn(), 800);
+        } else {
+          // Moves available → allow player to choose moves
+          this.state.gameState = "move";
+          this.broadcast("state-update", this.state);
+          this.startTurnTimer();
+        }
       }
-    }, 650); // Slightly more than 600ms to be safe
+    }, 650);
 
     return { success: true, rollId, value: val };
   }
@@ -350,12 +362,17 @@ export class LudoRoom {
     player.lastActivityAt = Date.now();
 
     clearTimeout(this.transitionTimer);
-    // ALLOW MOVE IF IN 'move' OR IF 'roll' BUT WE HAVE DICE READY (like after a 6)
+
+    // 🎲 STRICT: Only allow moves in "move" state (after rolling is done)
     if (
       this.state.gameState !== "move" &&
-      (this.state.gameState !== "roll" || this.state.rollQueue.length === 0)
-    )
+      this.state.gameState !== "junction"
+    ) {
+      console.warn(
+        `❌ Cannot move in '${this.state.gameState}' state. Must be 'move' or 'junction'.`,
+      );
       return;
+    }
 
     const token = this.state.tokens[player.colorIndex][tokenIndex];
     if (!token) return;
@@ -511,6 +528,7 @@ export class LudoRoom {
       return;
     }
 
+    // 🎲 After move, check if more moves are possible
     if (this.state.rollQueue.length === 0 || !this.canAnyMove()) {
       this.nextTurn();
     } else {

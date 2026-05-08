@@ -2,6 +2,31 @@ export class NetworkManager {
   constructor(gameInstance) {
     this.game = gameInstance;
 
+    // Track last real user gesture to prevent iOS Safari getUserMedia blocks
+    this._lastUserGestureAt = 0;
+    const markGesture = () => {
+      this._lastUserGestureAt = Date.now();
+    };
+    window.addEventListener("touchstart", markGesture, { passive: true });
+    window.addEventListener("pointerdown", markGesture, { passive: true });
+    window.addEventListener("click", markGesture, { passive: true });
+
+    // Full iOS Safari audio unlock handling
+    this._audioCtx = null;
+    this._audioUnlocked = false;
+
+    window.addEventListener("ludo-audio-unlocked", () => {
+      this.unlockAudioContextAndRetry("event:ludo-audio-unlocked");
+    });
+
+    // Also unlock on first visibility return (in case suspended)
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") {
+        this.unlockAudioContextAndRetry("visibilitychange:visible");
+        this.applyRemoteAudioMuteStates();
+      }
+    });
+
     // Use the global 'io' from the CDN script in index.html
     this.socket = null;
     if (typeof io !== "undefined") {
@@ -11,10 +36,13 @@ export class NetworkManager {
         typeof import.meta !== "undefined" &&
         typeof import.meta.env !== "undefined" &&
         import.meta.env.DEV;
-      
+
       const socketUrl = isDev ? "http://localhost:3000" : undefined;
-      console.log("🔌 Connecting to socket server:", socketUrl || "Default (Same Origin)");
-      
+      console.log(
+        "🔌 Connecting to socket server:",
+        socketUrl || "Default (Same Origin)",
+      );
+
       this.socket = io(socketUrl, {
         reconnection: true,
         reconnectionAttempts: 10,
@@ -380,48 +408,107 @@ export class NetworkManager {
   }
 
   async toggleMic() {
-    if (!this.localStream) {
-      try {
-        console.log("🎤 Requesting microphone access...");
-        this.localStream = await navigator.mediaDevices.getUserMedia({
-          audio: {
-            echoCancellation: { ideal: true },
-            noiseSuppression: { ideal: true },
-            autoGainControl: { ideal: true },
-          },
-        });
-        
-        // Ensure tracks are enabled
-        this.localStream.getAudioTracks().forEach((track) => {
-          track.enabled = true;
-          console.log("✅ Audio track enabled:", track.label);
-        });
+    // iOS Safari: getUserMedia must come from a real user gesture
+    const now = Date.now();
+    const gestureRecent = now - this._lastUserGestureAt < 1500;
+    if (!gestureRecent) {
+      console.warn("🎤 toggleMic blocked: no recent user gesture");
+      return false;
+    }
 
-        this.isMicOn = true;
-        this.broadcastVoiceStatus();
-        
-        // Add tracks to any existing peers
-        this.addLocalTracksToPeers();
-        
-        // If we have other people in the room, start connections with them
-        Object.values(this.socketIds).forEach((sid) => {
-          if (sid !== this.socket?.id && !this.peers[sid]) {
-            this.createPeerConnection(sid, true);
-          }
+    if (!navigator.mediaDevices?.getUserMedia) {
+      console.error("❌ mediaDevices.getUserMedia not available on this browser.");
+      return false;
+    }
+
+    const secureOk =
+      window.isSecureContext ||
+      location.protocol === "https:" ||
+      location.hostname === "localhost";
+    if (!secureOk) {
+      console.error("❌ Microphone requires HTTPS/secure context.");
+      return false;
+    }
+
+    // Turning mic OFF
+    if (this.localStream && this.isMicOn) {
+      this.isMicOn = false;
+      try {
+        this.localStream.getAudioTracks().forEach((t) => {
+          t.enabled = false;
         });
-      } catch (e) {
-        console.error("❌ Mic access denied or error:", e);
-        return false;
+        // Stop tracks to release mic on iOS
+        this.localStream.getTracks().forEach((t) => t.stop());
+      } catch {
+        // ignore
       }
-    } else {
-      this.isMicOn = !this.isMicOn;
-      this.localStream.getAudioTracks().forEach(track => {
-        track.enabled = this.isMicOn;
+      this.localStream = null;
+      this.broadcastVoiceStatus();
+      return false;
+    }
+
+    // Turning mic ON
+    if (this.localStream) {
+      // stream exists but mic off -> re-enable
+      this.isMicOn = true;
+      try {
+        this.localStream.getAudioTracks().forEach((t) => (t.enabled = true));
+      } catch {
+        this.localStream = null;
+      }
+      this.broadcastVoiceStatus();
+      this.addLocalTracksToPeers();
+      return true;
+    }
+
+    // Re-request mic, with a small delay to help iOS permission flow settle
+    try {
+      console.log("🎤 Requesting microphone access...");
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: { ideal: true },
+          noiseSuppression: { ideal: true },
+          autoGainControl: { ideal: true },
+        },
       });
 
+      // iOS may return immediately but tracks might be disabled briefly
+      await new Promise((r) => setTimeout(r, 150));
+
+      const audioTracks = stream.getAudioTracks();
+      if (!audioTracks.length) {
+        console.error("❌ No audio tracks returned from getUserMedia.");
+        stream.getTracks().forEach((t) => t.stop());
+        return false;
+      }
+
+      audioTracks.forEach((track) => {
+        track.enabled = true;
+      });
+
+      this.localStream = stream;
+      this.isMicOn = true;
+
+      console.log("🎤 Mic ON - track enabled:", audioTracks[0]?.enabled);
+
       this.broadcastVoiceStatus();
+      this.addLocalTracksToPeers();
+
+      Object.values(this.socketIds).forEach((sid) => {
+        if (sid !== this.socket?.id && !this.peers[sid]) {
+          this.createPeerConnection(sid, true);
+        }
+      });
+
+      return true;
+    } catch (e) {
+      // DeniedPermissionsError etc.
+      console.warn("❌ Mic permission error:", e?.name || e, e);
+      this.isMicOn = false;
+      this.localStream = null;
+      this.broadcastVoiceStatus();
+      return false;
     }
-    return this.isMicOn;
   }
 
   broadcastVoiceStatus() {
@@ -435,6 +522,8 @@ export class NetworkManager {
   setGlobalSpeakerEnabled(enabled) {
     this.globalSpeakerEnabled = Boolean(enabled);
     this.applyRemoteAudioMuteStates();
+    // Re-try play after toggling (mobile autoplay policies)
+    this.unlockAudioContextAndRetry("speaker-toggle");
   }
 
   setPlayerMuted(color, muted) {
@@ -456,7 +545,10 @@ export class NetworkManager {
 
   applyRemoteAudioMuteState(socketId) {
     const audio = this.remoteAudioEls[socketId];
-    if (!audio) return;
+    if (!audio) {
+      console.debug("⚠️ Audio element not found for", socketId);
+      return;
+    }
 
     const color = this.socketIdColors[socketId];
     const muted =
@@ -464,35 +556,62 @@ export class NetworkManager {
       (color !== undefined && this.mutedPlayerColors.has(color));
 
     audio.muted = muted;
-    audio.volume = muted ? 0 : 0.7;
+    audio.volume = muted ? 0 : 0.8;
 
+    // Important: Do NOT pause() on mute for Safari/WebRTC stability.
+    // We only toggle muted + track.enabled.
     if (audio.srcObject) {
-      audio.srcObject.getAudioTracks().forEach((track) => {
-        track.enabled = !muted;
-      });
+      try {
+        audio.srcObject.getAudioTracks().forEach((track) => {
+          track.enabled = !muted;
+        });
+      } catch (e) {
+        console.warn("🔊 applyRemoteAudioMuteState track toggle failed:", e);
+      }
     }
 
-    if (muted) {
-      audio.pause();
-    } else {
-      audio.play().catch((e) => {
-        console.debug("Audio play deferred:", e);
-      });
+    if (!muted) {
+      // Force play after srcObject assignment/unmute
+      this.unlockAudioContextAndRetry(`audio-unmute:${socketId}`);
+      audio
+        .play()
+        .then(() => {
+          // ok
+        })
+        .catch((e) => {
+          console.warn("🔊 Audio play blocked (retry later):", e?.name || e, socketId);
+          setTimeout(() => {
+            audio.play().catch(() => {});
+          }, 600);
+        });
     }
   }
 
   addLocalTracksToPeers() {
     if (!this.localStream) return;
-    Object.values(this.peers).forEach((pc) => {
-      const localTrack = this.localStream.getAudioTracks()[0];
-      if (!localTrack) return;
-      const audioSender = pc
-        .getSenders()
-        .find((s) => s.track && s.track.kind === "audio");
-      if (audioSender) {
-        audioSender.replaceTrack(localTrack);
-      } else {
-        pc.addTrack(localTrack, this.localStream);
+    const localTrack = this.localStream.getAudioTracks()[0];
+    if (!localTrack) {
+      console.warn("❌ No local audio track found");
+      return;
+    }
+
+    Object.entries(this.peers).forEach(([socketId, pc]) => {
+      try {
+        const audioSender = pc
+          .getSenders()
+          .find((s) => s.track && s.track.kind === "audio");
+        if (audioSender) {
+          console.log("🔄 Replacing audio track for", socketId);
+          audioSender.replaceTrack(localTrack).catch((e) => {
+            console.error("Replace track error:", e);
+            pc.addTrack(localTrack, this.localStream);
+          });
+        } else {
+          console.log("➕ Adding audio track to", socketId);
+          pc.addTrack(localTrack, this.localStream);
+        }
+      } catch (e) {
+        console.error("Error adding track to peer", socketId, e);
       }
     });
   }
@@ -503,6 +622,7 @@ export class NetworkManager {
       return;
     }
 
+    // TURN is crucial for mobile networks/NAT that can't do STUN-only.
     const pc = new RTCPeerConnection({
       iceServers: [
         { urls: "stun:stun.l.google.com:19302" },
@@ -511,9 +631,29 @@ export class NetworkManager {
         { urls: "stun:stun3.l.google.com:19302" },
         { urls: "stun:stun4.l.google.com:19302" },
         { urls: "stun:global.stun.twilio.com:3478" },
+        // Public TURN fallback (may still be rate-limited). Replace with your own in prod.
+        {
+          urls: "turn:global-turn.metered.ca:80?transport=udp",
+          username: "anonymous",
+          credential: "anonymous",
+        },
+        {
+          urls: "turn:global-turn.metered.ca:443?transport=tcp",
+          username: "anonymous",
+          credential: "anonymous",
+        },
       ],
     });
     this.peers[targetSocketId] = pc;
+
+    // 🔧 FIX: Add local audio tracks BEFORE creating offer (so they're included in SDP)
+    if (this.localStream) {
+      const audioTrack = this.localStream.getAudioTracks()[0];
+      if (audioTrack) {
+        console.log("🎤 Adding local audio track to peer:", targetSocketId);
+        pc.addTrack(audioTrack, this.localStream);
+      }
+    }
 
     if (isInitiator) {
       const dc = pc.createDataChannel("chat");
@@ -544,14 +684,43 @@ export class NetworkManager {
         audio = document.createElement("audio");
         audio.id = `audio-${targetSocketId}`;
         audio.autoplay = true;
+
+        // iOS/Safari inline playback attributes
+        audio.setAttribute("playsinline", "true");
+        audio.setAttribute("webkit-playsinline", "true");
         audio.playsInline = true;
-        // Don't append to body, but keep reference
+
+        // Avoid display:none which can break iOS playback. Use 1px hidden instead.
+        audio.style.opacity = "0";
+        audio.style.position = "absolute";
+        audio.style.left = "-9999px";
+        audio.style.top = "0";
+        audio.style.width = "1px";
+        audio.style.height = "1px";
+        audio.style.pointerEvents = "none";
+
+        document.body.appendChild(audio);
+        console.log("📍 Audio element appended to DOM:", audio.id);
+
         this.remoteAudioEls[targetSocketId] = audio;
       }
 
       if (audio.srcObject !== remoteStream) {
         audio.srcObject = remoteStream;
+        console.log("🎧 Audio stream set for", targetSocketId);
+
+        // Ensure audio element play after srcObject assignment
         this.applyRemoteAudioMuteState(targetSocketId);
+        this.unlockAudioContextAndRetry(`audio-src:${targetSocketId}`);
+
+        audio
+          .play()
+          .then(() => {
+            console.log("🔊 Remote audio play OK:", targetSocketId);
+          })
+          .catch((e) => {
+            console.warn("🔊 Remote audio play failed:", e?.name || e, targetSocketId);
+          });
       }
     };
 
@@ -583,6 +752,7 @@ export class NetworkManager {
             toSocketId: targetSocketId,
             signal: pc.localDescription,
           });
+          console.log("📤 Offer sent to", targetSocketId);
         });
     }
   }
@@ -625,6 +795,43 @@ export class NetworkManager {
     }
 
     console.log(`Cleaned up connection for ${targetSocketId}`);
+  }
+
+  unlockAudioContextAndRetry(reason = "unknown") {
+    try {
+      // Lazily create/resume an AudioContext on user gesture
+      if (!this._audioCtx) {
+        const Ctx = window.AudioContext || window.webkitAudioContext;
+        if (!Ctx) return;
+        this._audioCtx = new Ctx();
+        console.log("🔊 AudioContext created:", this._audioCtx.state, "reason:", reason);
+      } else {
+        console.log("🔊 AudioContext state:", this._audioCtx.state, "reason:", reason);
+      }
+
+      if (this._audioCtx && this._audioCtx.state === "suspended") {
+        this._audioUnlocked = false;
+        this._audioCtx.resume()
+          .then(() => {
+            this._audioUnlocked = true;
+            console.log("🔊 AudioContext resumed:", this._audioCtx.state);
+          })
+          .catch((e) => console.warn("🔊 AudioContext resume failed:", e));
+      } else {
+        this._audioUnlocked = true;
+      }
+    } catch (e) {
+      console.warn("🔊 unlockAudioContextAndRetry error:", e);
+    }
+
+    // Retry remote audio elements
+    try {
+      Object.keys(this.remoteAudioEls).forEach((sid) => {
+        this.applyRemoteAudioMuteState(sid);
+      });
+    } catch {
+      // ignore
+    }
   }
 
   getSocketStatus() {

@@ -37,6 +37,25 @@ function setCanvasInteractivity(enabled) {
 // Default: lobby UI active, block canvas clicks
 setCanvasInteractivity(false);
 
+/** =========================================================
+ * Universal button touch fix (mobile compatibility)
+ * - pointerup event delegation triggers native .click()
+ * - uses timestamp guard to reduce double-trigger issues
+ * ========================================================= */
+let __ludoLastTapAt = 0;
+document.addEventListener("pointerup", (e) => {
+  const now = Date.now();
+  if (now - __ludoLastTapAt < 200) return;
+  __ludoLastTapAt = now;
+
+  const btn = e.target?.closest?.("button");
+  if (!btn) return;
+
+  // If browser/native click will also fire, this guard helps.
+  // Still, double actions can happen in rare cases due to platform quirks.
+  btn.click();
+});
+
 // Make network globally accessible for debugging
 window.network = network;
 
@@ -1064,7 +1083,9 @@ function sendMyChatMessage(text) {
 }
 
 function handleInput(e) {
-  if (e.cancelable && e.target === canvas) e.preventDefault();
+  // Do NOT preventDefault() on canvas interactions globally.
+  // On iOS/Safari, canceling can interfere with focusing the hidden chat input proxy
+  // (which is required for the keyboard to open).
   const pos = getPos(e);
   if (!pos) return;
   const [sx, sy] = pos;
@@ -1300,12 +1321,103 @@ function isEventInsideChatUI(e) {
   return false;
 }
 
+function unlockMobileAudioOnce() {
+  if (unlockMobileAudioOnce._done) return;
+  unlockMobileAudioOnce._done = true;
+
+  try {
+    // Resume SynthesizedAudioManager WebAudio (it lazily creates AudioContext on first beep)
+    if (game?.audio?.init) game.audio.init();
+  } catch {
+    // ignore
+  }
+
+  try {
+    // Let networking/voice layer retry audio playback now that a user gesture happened.
+    window.dispatchEvent(new Event("ludo-audio-unlocked"));
+  } catch {
+    // ignore
+  }
+}
+
+/**
+ * Unified mobile/touch + pointer handling:
+ * - pointerdown/pointerup first (works in Chrome Android + Samsung + modern Safari with PointerEvents)
+ * - touchstart/touchend fallback
+ * - keep click as fallback only (desktop + older browsers)
+ *
+ * Goal: taps behave like desktop clicks without 300ms delay.
+ */
+let lastInputFireAt = 0;
+function fireHandleInputFromEvent(e) {
+  const now = Date.now();
+  if (now - lastInputFireAt < 80) return; // debounce double-fires
+  lastInputFireAt = now;
+
+  unlockMobileAudioOnce();
+
+  // If chat input is active, don't let the canvas handler swallow the tap/click that should focus the input.
+  if (game?.chat?.active && isEventInsideChatUI(e)) return;
+
+  handleInput(e);
+}
+
+const supportsPointerEvents = typeof window !== "undefined" && "PointerEvent" in window;
+if (supportsPointerEvents) {
+  canvas.addEventListener(
+    "pointerdown",
+    (e) => {
+      // Only primary touch/mouse/stylus
+      if (e.isPrimary === false) return;
+      // Prevent mouse emulation from triggering our handler twice
+      if (e.pointerType === "mouse") return;
+      // DO NOT preventDefault() here:
+      // On iOS/Safari it can interfere with focusing the hidden proxy input
+      // (which is needed to open the keyboard).
+    },
+    { passive: true },
+  );
+
+  canvas.addEventListener(
+    "pointerup",
+    (e) => {
+      if (e.isPrimary === false) return;
+      // Ignore mouse pointerup (let click fallback handle desktop)
+      if (e.pointerType === "mouse") return;
+      e.preventDefault();
+      fireHandleInputFromEvent(e);
+    },
+    { passive: false },
+  );
+} else {
+  // Fallback for very old browsers: touchstart/touchend
+  // - touchstart: block scroll/gesture so the tap isn't swallowed
+  // - touchend: actually fire the same logic as click/pointerup
+  canvas.addEventListener(
+    "touchstart",
+    (e) => {
+      e.preventDefault();
+    },
+    { passive: false },
+  );
+
+  canvas.addEventListener(
+    "touchend",
+    (e) => {
+      e.preventDefault();
+      fireHandleInputFromEvent(e);
+    },
+    { passive: false },
+  );
+}
+
+// Desktop + older fallback
 canvas.addEventListener(
   "click",
   (e) => {
-    // If chat input is active, don't let the canvas handler swallow the click that should focus the input.
-    if (game?.chat?.active && isEventInsideChatUI(e)) return;
-    handleInput(e);
+    // On mobile we already handle touch/pointer. If this is a mobile-emulated click, ignore.
+    // pointerType won't be present on click, so rely on recent timestamp debounce.
+    fireHandleInputFromEvent(e);
   },
   { passive: false },
 );
