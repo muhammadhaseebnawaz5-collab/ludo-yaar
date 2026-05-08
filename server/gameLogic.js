@@ -329,7 +329,10 @@ export class LudoRoom {
         this.startTurnTimer();
         return;
       } else {
-        // 🎲 Non-6 rolled: End rolling phase, move to movement phase
+        // 🎲 Non-6 rolled: End rolling phase, move to movement phase.
+        // Home/base tokens cannot move on non-6 rolls; only already-active
+        // tokens are eligible. If all tokens are still in home/base, the turn
+        // passes automatically.
         this.state.rollQueue.push(val);
 
         // Check if player has any valid moves
@@ -382,6 +385,13 @@ export class LudoRoom {
       !this.canTokenMove(token, rollValue)
     )
       return;
+
+    if (token.inHome && rollValue !== 6) {
+      console.warn(
+        `❌ Home token can only move on a 6, attempted roll ${rollValue}`,
+      );
+      return;
+    }
 
     this.executeMove(token, rollValue);
   }
