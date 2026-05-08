@@ -1384,10 +1384,11 @@ if (supportsPointerEvents) {
       if (e.isPrimary === false) return;
       // Ignore mouse pointerup (let click fallback handle desktop)
       if (e.pointerType === "mouse") return;
-      e.preventDefault();
+      // IMPORTANT: do NOT preventDefault() here.
+      // On iOS/Safari, preventDefault on pointer/touch can block keyboard opening for programmatic focus.
       fireHandleInputFromEvent(e);
     },
-    { passive: false },
+    { passive: true },
   );
 } else {
   // Fallback for very old browsers: touchstart/touchend

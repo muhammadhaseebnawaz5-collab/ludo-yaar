@@ -466,9 +466,11 @@ export class NetworkManager {
       console.log("🎤 Requesting microphone access...");
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
-          echoCancellation: { ideal: true },
-          noiseSuppression: { ideal: true },
-          autoGainControl: { ideal: true },
+          // Mobile browsers often ignore/partially support { ideal: true }.
+          // Use strict booleans instead.
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
         },
       });
 
@@ -556,7 +558,11 @@ export class NetworkManager {
       (color !== undefined && this.mutedPlayerColors.has(color));
 
     audio.muted = muted;
-    audio.volume = muted ? 0 : 0.8;
+
+    // If we are actively sending mic audio, cut remote playback volume
+    // to reduce speaker→mic feedback loops (major mobile echo trigger).
+    const volumeWhenUnmuted = this.isMicOn ? 0.25 : 0.8;
+    audio.volume = muted ? 0 : volumeWhenUnmuted;
 
     // Important: Do NOT pause() on mute for Safari/WebRTC stability.
     // We only toggle muted + track.enabled.

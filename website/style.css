@@ -136,13 +136,13 @@ canvas {
 }
 
 .mobile-chat-input-proxy {
-  position: absolute;
+  position: fixed;
   left: 0;
   top: 0;
-  width: 1px;
-  height: 1px;
-  opacity: 0;
-  pointer-events: auto;
+  width: 44px;
+  height: 44px;
+  opacity: 0.01; /* must be > 0 so mobile Safari reliably focuses it */
+  pointer-events: none; /* avoid canvas/tap conflicts */
   z-index: 99999;
 }
 
