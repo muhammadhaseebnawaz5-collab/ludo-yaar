@@ -1064,10 +1064,11 @@ function getPos(e) {
 
   if (clientX === undefined || clientY === undefined) return null;
 
-  return [
-    (clientX - rect.left) * (SCREEN_W / rect.width),
-    (clientY - rect.top) * (SCREEN_H / rect.height),
-  ];
+  const lx = (clientX - rect.left) * (SCREEN_W / rect.width);
+  const ly = (clientY - rect.top) * (SCREEN_H / rect.height);
+  
+  if (isNaN(lx) || isNaN(ly)) return null;
+  return [lx, ly];
 }
 
 function syncMobileChatInput() {
@@ -1096,12 +1097,15 @@ function sendMyChatMessage(text) {
 
 // Double touch prevention
 let lastInputTimestamp = 0;
-const INPUT_COOLDOWN_MS = 350;
+const INPUT_COOLDOWN_MS = 150; // Reduced from 350ms for better responsiveness
 
 function handleInput(e) {
   const now = Date.now();
   if (now - lastInputTimestamp < INPUT_COOLDOWN_MS) return;
   lastInputTimestamp = now;
+
+  // ✅ Always try to unlock audio on interaction
+  unlockMobileAudioOnce();
 
   if (e.cancelable && e.target === canvas) e.preventDefault();
 
@@ -1289,22 +1293,11 @@ function handleInput(e) {
 
   // Mic button
   if (sx >= 88 && sx <= 160 && sy >= SCREEN_H - 60 && sy <= SCREEN_H - 8) {
-    
-    // ✅ Mobile safe async call
-    (async () => {
-      try {
-        const isOn = await network.toggleMic();
-        console.log("🎤 Mic toggled:", isOn);
-        
-        // ✅ Null check
-        if (typeof isOn === "boolean") {
-          game.localMicMuted = !isOn;
-        }
-      } catch (err) {
-        console.error("Mic toggle error:", err);
+    network.toggleMic().then((isOn) => {
+      if (typeof isOn === "boolean") {
+        game.localMicMuted = !isOn;
       }
-    })();
-    
+    });
     return;
   }
 
@@ -1363,21 +1356,17 @@ function isEventInsideChatUI(e) {
 }
 
 function unlockMobileAudioOnce() {
-  if (unlockMobileAudioOnce._done) return;
-  unlockMobileAudioOnce._done = true;
-
+  // We can call this multiple times, it has its own logic for AudioContext
   try {
-    // Resume SynthesizedAudioManager WebAudio (it lazily creates AudioContext on first beep)
+    // Resume SynthesizedAudioManager WebAudio
     if (game?.audio?.init) game.audio.init();
-  } catch {
-    // ignore
-  }
-
-  try {
-    // Let networking/voice layer retry audio playback now that a user gesture happened.
-    window.dispatchEvent(new Event("ludo-audio-unlocked"));
-  } catch {
-    // ignore
+    
+    // Resume network audio elements (very important for mobile!)
+    if (network && network.unlockAudioContextAndRetry) {
+      network.unlockAudioContextAndRetry("user-gesture");
+    }
+  } catch (err) {
+    console.warn("Audio unlock failed:", err);
   }
 }
 

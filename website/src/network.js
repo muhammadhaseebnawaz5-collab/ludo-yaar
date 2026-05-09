@@ -371,6 +371,12 @@ export class NetworkManager {
   }
 
   async toggleMic() {
+    // ✅ Check if we are in a secure context (HTTPS)
+    if (typeof window !== "undefined" && (!window.isSecureContext || !navigator.mediaDevices)) {
+      console.error("❌ Mic blocked: HTTPS is REQUIRED for mobile voice chat.");
+      return false;
+    }
+
     if (!this.localStream) {
       try {
         const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
@@ -389,22 +395,9 @@ export class NetworkManager {
           track.enabled = true;
         });
 
-        // ✅ LOCAL AUDIO — muted play (browser needs this for proper routing)
-        if (this._localAudioEl) {
-          this._localAudioEl.pause();
-          this._localAudioEl = null;
-        }
-        const localAudio = new Audio();
-        localAudio.srcObject = this.localStream;
-        localAudio.muted = true;      // ✅ muted = apni awaaz nahi sunenge
-        localAudio.volume = 0;
-        localAudio.autoplay = false;  // ✅ autoplay OFF
-        this._localAudioEl = localAudio;
-
+        // ✅ LOCAL AUDIO logic removed to prevent echo
         this.isMicOn = true;
         this.broadcastVoiceStatus();
-
-        // ✅ YE LINE ZAROORI HAI — existing peers mein track add karo
         this.addLocalTracksToPeers();
 
         // ✅ Naye peers banao jo abhi connected hain
@@ -419,10 +412,15 @@ export class NetworkManager {
         return false;
       }
     } else {
-      // Toggle
+      // ✅ Robust Toggle
       this.isMicOn = !this.isMicOn;
       this.localStream.getAudioTracks().forEach((track) => {
         track.enabled = this.isMicOn;
+        // If track died (common on some mobile browsers after long mute), we need to re-acquire
+        if (this.isMicOn && track.readyState === 'ended') {
+          this.localStream = null;
+          return this.toggleMic();
+        }
       });
       this.broadcastVoiceStatus();
     }
@@ -482,8 +480,12 @@ export class NetworkManager {
     if (muted) {
       audio.pause();
     } else {
+      // ✅ Ensure volume is set before play
+      audio.volume = 0.7;
+      audio.muted = false;
       audio.play().catch((e) => {
-        console.debug("Audio play deferred:", e);
+        console.debug("Audio play deferred (waiting for gesture):", e);
+        // Will be retried on next touch/click via unlockAudioContextAndRetry
       });
     }
   }
