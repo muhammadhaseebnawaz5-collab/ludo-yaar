@@ -387,11 +387,16 @@ export class NetworkManager {
             noiseSuppression: true,
             autoGainControl: true,
             channelCount: 1,
-            sampleRate: isMobile ? 16000 : 48000,
+            sampleRate: isMobile ? 16000 : 44100,
+            googEchoCancellation: true,
+            googAutoGainControl: true,
+            googNoiseSuppression: true,
           },
         });
 
+        console.log("🎤 Local stream acquired:", this.localStream.id);
         this.localStream.getAudioTracks().forEach((track) => {
+          console.log("🎤 Local track:", track.label, "state:", track.readyState);
           track.enabled = true;
         });
 
@@ -469,7 +474,7 @@ export class NetworkManager {
       (color !== undefined && this.mutedPlayerColors.has(color));
 
     audio.muted = muted;
-    audio.volume = muted ? 0 : 0.7;
+    audio.volume = muted ? 0 : 0.6; // Slightly reduced volume (0.7 -> 0.6)
 
     if (audio.srcObject) {
       audio.srcObject.getAudioTracks().forEach((track) => {
@@ -481,7 +486,7 @@ export class NetworkManager {
       audio.pause();
     } else {
       // ✅ Ensure volume is set before play
-      audio.volume = 0.7;
+      audio.volume = 0.6;
       audio.muted = false;
       audio.play().catch((e) => {
         console.debug("Audio play deferred (waiting for gesture):", e);
@@ -550,6 +555,17 @@ export class NetworkManager {
       };
     }
 
+    pc.oniceconnectionstatechange = () => {
+      console.log(`❄️ ICE state for ${targetSocketId}: ${pc.iceConnectionState}`);
+      if (
+        pc.iceConnectionState === "disconnected" ||
+        pc.iceConnectionState === "failed" ||
+        pc.iceConnectionState === "closed"
+      ) {
+        // Handle disconnection logic if needed
+      }
+    };
+
     pc.onicecandidate = (event) => {
       if (event.candidate) {
         this.socket.emit("voice-signal", {
@@ -585,16 +601,20 @@ export class NetworkManager {
           audio.setSinkId("").catch(() => {});
         }
 
-        audio.volume = isMobile ? 0.7 : 0.85;
+        audio.volume = isMobile ? 0.6 : 0.75;
         audio.muted = false;
 
         this.remoteAudioEls[targetSocketId] = audio;
+        console.log(`🔊 Created new audio element for ${targetSocketId}`);
       }
+
+      console.log(`📡 Remote track received from ${targetSocketId}, tracks:`, remoteStream.getAudioTracks().length);
 
       if (audio.srcObject !== remoteStream) {
         audio.pause();
         audio.srcObject = null;
         audio.srcObject = remoteStream;
+        console.log(`📡 Attached remote stream to audio element for ${targetSocketId}`);
       }
 
       this.applyRemoteAudioMuteState(targetSocketId);
@@ -620,6 +640,7 @@ export class NetworkManager {
 
     // ✅ Add local tracks if mic is already on
     if (this.localStream) {
+      console.log(`➕ Adding local tracks to new peer ${targetSocketId}`);
       this.localStream.getAudioTracks().forEach((track) => {
         const alreadyAdded = pc
           .getSenders()
@@ -631,9 +652,14 @@ export class NetworkManager {
     }
 
     if (isInitiator) {
+      console.log(`📡 Creating offer for ${targetSocketId}`);
       pc.createOffer()
-        .then((offer) => pc.setLocalDescription(offer))
+        .then((offer) => {
+          console.log(`📡 Created offer for ${targetSocketId}, setting local description`);
+          return pc.setLocalDescription(offer);
+        })
         .then(() => {
+          console.log(`📡 Sending offer to ${targetSocketId}`);
           this.socket.emit("voice-signal", {
             roomId: this.roomId,
             toSocketId: targetSocketId,

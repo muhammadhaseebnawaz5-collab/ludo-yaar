@@ -178,18 +178,23 @@ io.on("connection", (socket) => {
   socket.on("leave-room", ({ roomId, sessionId }) => {
     const room = rooms.get(roomId);
     if (room) {
-      // Remove the player from the room
-      const playerIndex = room.players.findIndex(
-        (p) => p.sessionId === sessionId,
-      );
-      if (playerIndex !== -1) {
-        room.players.splice(playerIndex, 1);
-        console.log(
-          `Player ${sessionId} left room ${roomId}. Remaining: ${room.players.length}`,
-        );
+      const player = room.players.find((p) => p.sessionId === sessionId);
+      if (player) {
+        if (room.state.gameState === "lobby") {
+          room.players = room.players.filter((p) => p.sessionId !== sessionId);
+        } else {
+          // In game, mark as LEFT
+          if (!room.state.leftPlayers.includes(player.colorIndex)) {
+            room.state.leftPlayers.push(player.colorIndex);
+          }
+          player.isOnline = false;
+          player.socketId = null;
+          room.checkWinCondition();
+        }
 
-        // Broadcast updated player list
-        if (room.players.length > 0) {
+        console.log(`Player ${sessionId} left room ${roomId}.`);
+
+        if (room.players.length > 0 && room.players.some((p) => p.isOnline || p.botEnabled)) {
           io.to(roomId).emit("room-update", {
             playerCount: room.playerCount,
             players: room.players.map((p) => ({
@@ -200,15 +205,14 @@ io.on("connection", (socket) => {
               socketId: p.socketId,
             })),
           });
+          io.to(roomId).emit("state-update", room.state);
         } else {
-          // Delete empty room
           rooms.delete(roomId);
           console.log(`Room ${roomId} deleted (empty)`);
         }
       }
     }
 
-    // Leave socket.io room
     socket.leave(roomId);
     socket.roomId = null;
     socket.sessionId = null;

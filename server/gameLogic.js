@@ -35,6 +35,7 @@ export class LudoRoom {
       playerCount: this.playerCount,
       rollSeq: 0,
       lastRoll: null,
+      leftPlayers: [], // Track players who left permanently
     };
 
     this.turnTimer = null;
@@ -170,10 +171,47 @@ export class LudoRoom {
     if (player) {
       player.isOnline = false;
       player.socketId = null;
-      player.botEnabled = true;
+      
+      // If in lobby, just remove them
+      if (this.state.gameState === "lobby") {
+        this.players = this.players.filter(p => p.socketId !== null || p.botEnabled);
+      } else {
+        // If game in progress, they might reconnect or we might treat them as LEFT
+        // For now, let's assume they stay as a bot unless they explicitly "leave"
+        // But the user wants tokens to disappear if they "leave/disconnect"
+        // So we'll treat a disconnect during game as a "LEFT" for token visibility
+        if (!this.state.leftPlayers.includes(player.colorIndex)) {
+          this.state.leftPlayers.push(player.colorIndex);
+        }
+        player.botEnabled = true;
+        this.checkWinCondition();
+      }
+      
       this.broadcast("state-update", this.state);
       this.broadcastRoomUpdate();
     }
+  }
+
+  checkWinCondition() {
+    if (this.state.gameState === "end") return;
+
+    const activePlayers = this.players.filter(p => !this.state.leftPlayers.includes(p.colorIndex));
+    
+    // Auto-win logic
+    if (activePlayers.length === 1 && this.players.length > 1) {
+      const winner = activePlayers[0].colorIndex;
+      this.state.winner = winner;
+      this.state.gameState = "end";
+      this.broadcast("game-over", { winner, reason: "all-others-left" });
+      return true;
+    }
+
+    if (activePlayers.length === 0) {
+      this.state.gameState = "end";
+      return true;
+    }
+
+    return false;
   }
 
   startGame() {
@@ -257,15 +295,32 @@ export class LudoRoom {
   }
 
   nextTurn() {
+    if (this.checkWinCondition()) return;
+
     this.state.rollQueue = [];
     this.state.pendingJunction = null;
 
     const order = this.getColorMap();
+    let ci = order.indexOf(this.state.currentPlayer);
+    
+    // Skip players who have left
+    let nextPlayerFound = false;
+    for (let i = 1; i <= order.length; i++) {
+      const nextIdx = (ci + i) % order.length;
+      const nextColor = order[nextIdx];
+      if (!this.state.leftPlayers.includes(nextColor)) {
+        this.state.currentPlayer = nextColor;
+        nextPlayerFound = true;
+        break;
+      }
+    }
 
-    const ci = order.indexOf(this.state.currentPlayer);
-    this.state.currentPlayer = order[(ci + 1) % order.length];
+    if (!nextPlayerFound) {
+        this.checkWinCondition();
+        return;
+    }
+
     this.state.gameState = "roll";
-
     this.broadcast("state-update", this.state);
     this.startTurnTimer();
   }

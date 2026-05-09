@@ -6,28 +6,28 @@ export const BOARD_SIZE = 450;
 export const CELL = BOARD_SIZE / 15; // 30px per cell
 
 export const COLORS = {
-    BG: '#3E1A3D',
-    BOARD_BORDER: '#5C3317',
+    BG: '#121212', // Sleek dark mode background
+    BOARD_BORDER: '#2C3E50', // Modern border
     WHITE: '#FFFFFF',
     BLACK: '#000000',
-    GREEN: '#1B8A2E',
-    YELLOW: '#C8900A',
-    RED: '#C0152B',
-    BLUE: '#1240AB',
+    GREEN: '#00D147', // Vibrant Green
+    YELLOW: '#FFD700', // Vibrant Gold/Yellow
+    RED: '#FF3131', // Bright Vibrant Red (No dark shade)
+    BLUE: '#00A8FF', // Vibrant Azure Blue
     LIGHT_GREEN: '#2ECC71',
     LIGHT_YELLOW: '#F1C40F',
-    LIGHT_RED: '#E74C3C',
+    LIGHT_RED: '#FF5C5C',
     LIGHT_BLUE: '#3498DB',
-    DARK_GREEN: '#145A32',
-    DARK_YELLOW: '#9A7D0A',
-    DARK_RED: '#7B241C',
-    DARK_BLUE: '#1B4F72',
-    GOLD: '#F1C40F',
+    DARK_GREEN: '#009432',
+    DARK_YELLOW: '#D4AF37',
+    DARK_RED: '#C0392B',
+    DARK_BLUE: '#2980B9',
+    GOLD: '#FFD700',
     DARK_GOLD: '#B7950B',
-    GRAY: '#95A5A6',
+    GRAY: '#BDC3C7',
     DARK_GRAY: '#7F8C8D',
     TRACK_BG: '#FFFFFF',
-    PURPLE: '#8E44AD',
+    PURPLE: '#9B59B6',
 };
 
 // P0=Green(TL), P1=Yellow(TR), P2=Red(BR), P3=Blue(BL)

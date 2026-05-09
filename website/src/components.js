@@ -85,8 +85,12 @@ export class Token {
       const dy = target[1] - this.startPy;
       const dist = Math.sqrt(dx * dx + dy * dy);
 
-      // Speed of hop depends on frame rate, complete hop in ~8-10 frames (faster)
-      this.hopProgress += 0.12;
+      // 🚀 FASTER MOVEMENT
+      // Roll based dynamic speed: Roll 1-2 -> normal (~0.12), Roll 5-6 -> faster (~0.2)
+      // Since we don't have the roll here easily, we'll just use a faster baseline
+      // and maybe check if moveQueue is long.
+      const speed = this.moveQueue.length > 3 ? 0.22 : 0.16;
+      this.hopProgress += speed;
 
       if (this.hopProgress >= 1) {
         this.px = target[0];
@@ -120,62 +124,16 @@ export class Token {
     ctx.translate(x, y);
 
     // ══════════════════════════════════════════
-    // TOKEN GLOW SYSTEM (Canvas-based)
+    // NEW SUBTLE ACTIVE ANIMATION
     // ══════════════════════════════════════════
     if (this.isCurrentPlayer && !this.finished) {
       if (this.isMoveable) {
-        // GOLDEN INTENSE GLOW — chal sakta hai
-        const pulseScale = 1 + Math.sin(this.pulse * 2) * 0.12; // fast bounce
-        const glowR = r * 1.6 * pulseScale;
-
-        // Outer golden halo (multiple layers for intensity)
-        [0.18, 0.28, 0.42].forEach((alpha, i) => {
-          const layerR = glowR * (1 + i * 0.3);
-          ctx.beginPath();
-          ctx.arc(0, 0, layerR, 0, Math.PI * 2);
-          ctx.fillStyle = `rgba(253, 224, 71, ${alpha})`;
-          ctx.fill();
-        });
-
-        // Bounce — token thoda upar jaata hai
-        const bounce = Math.sin(this.pulse * 2) * 5;
-        ctx.translate(0, -bounce);
-      } else if (this.inHome) {
-        // HOME TOKEN — blue idle glow (hamesha)
-        const pulseAlpha = 0.25 + Math.sin(this.pulse) * 0.12;
-        [1.5, 2.0, 2.6].forEach((mult, i) => {
-          ctx.beginPath();
-          ctx.arc(0, 0, r * mult, 0, Math.PI * 2);
-          ctx.fillStyle = `rgba(96, 165, 250, ${pulseAlpha / (i + 1)})`;
-          ctx.fill();
-        });
-
-        // Slow float (token thoda hilta hai)
-        const floatY = Math.sin(this.pulse * 0.6) * 3;
-        ctx.translate(0, -floatY);
-      } else {
-        // BOARD TOKEN — blue idle glow (hamesha current player ke)
-        const pulseAlpha = 0.2 + Math.sin(this.pulse) * 0.1;
-        [1.4, 1.9, 2.5].forEach((mult, i) => {
-          ctx.beginPath();
-          ctx.arc(0, 0, r * mult, 0, Math.PI * 2);
-          ctx.fillStyle = `rgba(96, 165, 250, ${pulseAlpha / (i + 1)})`;
-          ctx.fill();
-        });
+        // Very subtle scale pulse for active tokens
+        const breath = Math.sin(this.pulse * 1.5) * 0.06;
+        scale *= (1 + breath);
       }
-
-      // Ring pulse effect (expanding ring)
-      const ringProgress = (this.pulse % (Math.PI * 2)) / (Math.PI * 2);
-      const ringR = r * 1.2 + ringProgress * r * 2.5;
-      const ringAlpha = Math.max(0, 0.6 - ringProgress * 0.6);
-      ctx.strokeStyle = this.isMoveable
-        ? `rgba(251, 191, 36, ${ringAlpha})`
-        : `rgba(96, 165, 250, ${ringAlpha})`;
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.arc(0, 0, ringR, 0, Math.PI * 2);
-      ctx.stroke();
     }
+    // ══════════════════════════════════════════
 
     // Ensure full opacity for all tokens
     ctx.globalAlpha = 1.0;
@@ -483,6 +441,8 @@ export class ProfileAvatar {
     this.displayMessage = "";
     this.messageTimer = 0;
     this.messageAnimationApplied = false;
+    this.left = false; // Player has permanently left the game
+
 
     // Absolute layer tracks avatar on screen; inner container stays relative for overlays.
     this.avatarLayer = document.createElement("div");
@@ -638,21 +598,37 @@ export class ProfileAvatar {
     const [x, y] = this.position;
     const r = this.size / 2;
 
-    // Active glow / Mic ON pulse
-    if (this.active || this.micOn) {
-      const pulseCount = this.micOn ? 3 : 2;
-      for (let i = pulseCount; i > 0; i--) {
-        const alpha = this.micOn ? 0.18 - i * 0.04 : 0.09 - i * 0.01;
-        if (alpha <= 0) continue;
+    if (this.left) {
+        // Grayed out state for LEFT players
+        ctx.save();
+        ctx.globalAlpha = 0.5;
+        ctx.fillStyle = "#333";
         ctx.beginPath();
-        ctx.arc(x, y, r + 6 + i * 3, 0, Math.PI * 2);
-        ctx.fillStyle = this.micOn
-          ? `rgba(76, 175, 80, ${alpha})`
-          : `${this.color}${Math.floor(((50 - i * 8) / 255) * 100)
-              .toString(16)
-              .padStart(2, "0")}`;
+        ctx.arc(x, y, r, 0, Math.PI * 2);
         ctx.fill();
-      }
+        
+        ctx.fillStyle = "#888";
+        ctx.font = "bold 14px Arial";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText("LEFT", x, y);
+        
+        ctx.strokeStyle = "#555";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(x, y, r, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+        return;
+    }
+
+    // Outer border (if active or mic on)
+    if (this.active || this.micOn) {
+       ctx.beginPath();
+       ctx.arc(x, y, r + 4, 0, Math.PI * 2);
+       ctx.strokeStyle = this.micOn ? "rgba(76, 175, 80, 0.4)" : "rgba(255, 255, 255, 0.2)";
+       ctx.lineWidth = 2;
+       ctx.stroke();
     }
 
     // Avatar background

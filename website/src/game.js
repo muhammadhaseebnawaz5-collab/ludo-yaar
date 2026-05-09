@@ -142,6 +142,13 @@ export class LudoGame {
     this.network = null;
     this.turnEndsAt = 0;
     this.turnDuration = 30000;
+    this.leftPlayers = [];
+  }
+
+  subtleVibrate(ms = 15) {
+    if (typeof navigator !== "undefined" && navigator.vibrate) {
+      navigator.vibrate(ms);
+    }
   }
 
   getCellPixel(gx, gy) {
@@ -175,6 +182,7 @@ export class LudoGame {
   }
 
   isActivePlayer(playerIndex) {
+    if (this.leftPlayers && this.leftPlayers.includes(playerIndex)) return false;
     return this.getActivePlayerColors().includes(playerIndex);
   }
 
@@ -1240,6 +1248,7 @@ export class LudoGame {
 
     this.dice.roll();
     this.audio.playDiceRoll();
+    this.subtleVibrate(20);
 
     setTimeout(() => {
       const val = this.dice.value;
@@ -1333,6 +1342,7 @@ export class LudoGame {
   performTokenMove(token, roll) {
     this.rollQueue.splice(this.rollQueue.indexOf(roll), 1);
     this.audio.playMove();
+    this.subtleVibrate(15);
     this.moveSelection.hide();
 
     const startSteps = token.steps;
@@ -1562,26 +1572,35 @@ export class LudoGame {
     const map = new Map();
     this.tokens.forEach((pt) =>
       pt.forEach((t) => {
-        if (t.inHome || t.finished) {
+        if (t.inHome) {
           t.offset = { x: 0, y: 0 };
           return;
         }
+        
         const effectiveLapEnd = 51 + 52 * (t.lapCount || 0);
-        const key =
-          t.steps > effectiveLapEnd
-            ? `H${t.player}-${t.steps - effectiveLapEnd}`
-            : `M${(t.steps - 1 + PLAYER_START_INDICES[t.player]) % 52}`;
+        let key;
+        if (t.finished) {
+            key = "CENTER";
+        } else {
+            key = t.steps > effectiveLapEnd
+                ? `H${t.player}-${t.steps - effectiveLapEnd}`
+                : `M${(t.steps - 1 + PLAYER_START_INDICES[t.player]) % 52}`;
+        }
+
         if (!map.has(key)) map.set(key, []);
         map.get(key).push(t);
       }),
     );
-    map.forEach((group) => {
-      if (group.length > 1)
+    map.forEach((group, key) => {
+      if (group.length > 1) {
         group.forEach((t, i) => {
           const a = (Math.PI * 2 * i) / group.length;
-          t.offset = { x: Math.cos(a) * 9, y: Math.sin(a) * 9 };
+          const dist = key === "CENTER" ? 12 : 9;
+          t.offset = { x: Math.cos(a) * dist, y: Math.sin(a) * dist };
         });
-      else group[0].offset = { x: 0, y: 0 };
+      } else {
+        group[0].offset = { x: 0, y: 0 };
+      }
     });
   }
 
@@ -1678,6 +1697,12 @@ export class LudoGame {
     }
     if (state.winner !== null && state.winner !== undefined) {
       this.winner = state.winner;
+    }
+    if (state.leftPlayers) {
+        this.leftPlayers = state.leftPlayers;
+        this.avatars.forEach((a, i) => {
+            if (this.leftPlayers.includes(i)) a.left = true;
+        });
     }
 
     for (let p = 0; p < 4; p++) {
