@@ -373,52 +373,52 @@ export class NetworkManager {
   async toggleMic() {
     if (!this.localStream) {
       try {
-        this.localStream = await navigator.mediaDevices.getUserMedia({
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true,
-            sampleRate: 48000,
-          },
-        });
+        // ✅ Mobile-optimized constraints
+        const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 
-        // ✅ Track enable karo
+        const constraints = {
+          audio: {
+            echoCancellation: { ideal: true },
+            noiseSuppression: { ideal: true },
+            autoGainControl: { ideal: true },
+            googEchoCancellation: true, // Chrome specific
+            googAutoGainControl: true, // Chrome specific
+            googNoiseSuppression: true, // Chrome specific
+            googHighpassFilter: true, // Chrome specific
+            // ✅ Mobile pe lower sample rate (reduces feedback)
+            sampleRate: isMobile ? 16000 : 48000,
+            channelCount: 1, // Mono (less feedback on mobile)
+          },
+        };
+
+        this.localStream = await navigator.mediaDevices.getUserMedia(constraints);
+
         this.localStream.getAudioTracks().forEach((track) => {
           track.enabled = true;
+          console.log("🎤 Mic track settings:", track.getSettings());
         });
 
-        // ✅ NEVER play own audio — properly prevent echo
-        // Don't create Audio element for local stream at all
-        // (previous code created localAudio with muted=true but autoplay=true
-        //  which caused browser to sometimes unmute it)
+        // ✅ NEVER create Audio element for local stream
+        // (even muted=true autoplay can cause echo on some browsers)
 
         this.isMicOn = true;
         this.broadcastVoiceStatus();
         this.addLocalTracksToPeers();
 
-        // Connect to existing peers
         Object.values(this.socketIds).forEach((sid) => {
           if (sid !== this.socket.id && !this.peers[sid]) {
             this.createPeerConnection(sid, true);
           }
         });
       } catch (e) {
-        console.error("Mic access denied", e);
+        console.error("❌ Mic access denied:", e);
         return false;
       }
     } else {
-      // Toggle existing mic
       this.isMicOn = !this.isMicOn;
       this.localStream.getAudioTracks().forEach((track) => {
         track.enabled = this.isMicOn;
       });
-
-      // ✅ Agar mic off ho raha hai permanently — stream stop karo
-      if (!this.isMicOn) {
-        // Don't stop tracks fully (so re-enable works without getUserMedia again)
-        // Just disable is enough
-      }
-
       this.broadcastVoiceStatus();
     }
     return this.isMicOn;
@@ -461,36 +461,59 @@ export class NetworkManager {
     if (!audio) return;
 
     const color = this.socketIdColors[socketId];
-    const muted =
+    const shouldMute =
       !this.globalSpeakerEnabled ||
       (color !== undefined && this.mutedPlayerColors.has(color));
 
-    audio.muted = muted;
-
-    if (audio.srcObject) {
-      audio.srcObject.getAudioTracks().forEach((track) => {
-        track.enabled = !muted;
-      });
-    }
-
-    if (muted) {
-      // ✅ FIX: Volume 0 set karo BEFORE pause to prevent click/beep sound
-      audio.volume = 0;
-      audio.pause();
+    if (shouldMute) {
+      // ✅ Smooth mute — no abrupt cut (prevents beep)
+      const fadeOut = setInterval(() => {
+        if (audio.volume > 0.05) {
+          audio.volume = Math.max(0, audio.volume - 0.15);
+        } else {
+          audio.volume = 0;
+          audio.muted = true;
+          audio.pause();
+          if (audio.srcObject) {
+            audio.srcObject.getAudioTracks().forEach((t) => (t.enabled = false));
+          }
+          clearInterval(fadeOut);
+        }
+      }, 20);
     } else {
-      // ✅ FIX: Gradually ramp up volume to prevent beep on unmute
+      // ✅ Smooth unmute — gradual volume increase (prevents pop/beep)
+      audio.muted = false;
       audio.volume = 0;
-      audio.play()
+      if (audio.srcObject) {
+        audio.srcObject.getAudioTracks().forEach((t) => (t.enabled = true));
+      }
+
+      audio
+        .play()
         .then(() => {
-          // Smooth volume ramp up (prevents pop/beep)
-          let vol = 0;
-          const ramp = setInterval(() => {
-            vol = Math.min(vol + 0.1, 0.85);
-            audio.volume = vol;
-            if (vol >= 0.85) clearInterval(ramp);
+          const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+          const targetVol = isMobile ? 0.7 : 0.85;
+
+          const fadeIn = setInterval(() => {
+            if (audio.volume < targetVol - 0.05) {
+              audio.volume = Math.min(targetVol, audio.volume + 0.1);
+            } else {
+              audio.volume = targetVol;
+              clearInterval(fadeIn);
+            }
           }, 30);
         })
-        .catch((e) => console.debug("Audio play deferred:", e));
+        .catch((e) => {
+          console.debug("Audio play blocked:", e);
+          // ✅ Mobile pe user gesture ke baad play karo
+          const playOnTouch = () => {
+            audio.play().catch(() => {});
+            document.removeEventListener("touchstart", playOnTouch);
+            document.removeEventListener("click", playOnTouch);
+          };
+          document.addEventListener("touchstart", playOnTouch, { once: true });
+          document.addEventListener("click", playOnTouch, { once: true });
+        });
     }
   }
 
@@ -565,13 +588,7 @@ export class NetworkManager {
     };
 
     pc.ontrack = (event) => {
-      console.log("🎵 Received remote audio from", targetSocketId);
-
-      // ✅ FIX: Never play your own audio back
-      if (targetSocketId === this.socket.id) {
-        console.warn("Skipping self audio track");
-        return;
-      }
+      if (targetSocketId === this.socket.id) return;
 
       const remoteStream = event.streams[0];
       if (!remoteStream) return;
@@ -580,37 +597,34 @@ export class NetworkManager {
 
       if (!audio) {
         audio = new Audio();
+
+        // ✅ Mobile-specific audio settings
+        const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+
         audio.autoplay = true;
         audio.playsInline = true;
-        audio.volume = 0.85;
+        audio.setAttribute("playsinline", "");
+        audio.setAttribute("webkit-playsinline", "");
+
+        // ✅ Mobile pe earpiece instead of speaker (prevents echo)
+        if (isMobile && audio.setSinkId) {
+          // Try to use earpiece on mobile
+          audio.setSinkId("").catch(() => {});
+        }
+
+        audio.volume = isMobile ? 0.7 : 0.85;
         audio.muted = false;
+
         this.remoteAudioEls[targetSocketId] = audio;
       }
 
-      // ✅ FIX: Replace stream instead of returning if already set
-      // (prevents stale stream playing alongside new one)
       if (audio.srcObject !== remoteStream) {
         audio.pause();
         audio.srcObject = null;
         audio.srcObject = remoteStream;
-        console.log("🔄 Stream updated for", targetSocketId);
       }
 
       this.applyRemoteAudioMuteState(targetSocketId);
-
-      // ✅ Safe play with user gesture handling
-      const playPromise = audio.play();
-      if (playPromise) {
-        playPromise.catch((e) => {
-          console.debug("Audio autoplay blocked:", e);
-          // Will play on next user interaction
-          const playOnInteraction = () => {
-            audio.play().catch(() => {});
-            document.removeEventListener("pointerup", playOnInteraction);
-          };
-          document.addEventListener("pointerup", playOnInteraction);
-        });
-      }
     };
 
     pc.oniceconnectionstatechange = () => {

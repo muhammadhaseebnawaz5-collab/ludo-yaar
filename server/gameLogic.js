@@ -51,7 +51,22 @@ export class LudoRoom {
     this.rollHistory = [];
   }
 
-  rollDie() {
+  rollDie(playerColor) {
+    const stats = this.rollStats[playerColor];
+
+    // ✅ Anti-cheat: 3+ consecutive 6 ke baad force non-6
+    if (stats && stats.currentSixStreak >= 2) {
+      // Force 1-5
+      return randomInt(1, 6);
+    }
+
+    // ✅ Drought relief: 15+ rolls bina 6 ke → 6 ki probability double
+    if (stats && stats.currentSixDrought >= 15) {
+      // 2 mein se 1 chance for 6 (normally 1 in 6)
+      const relief = randomInt(1, 4);
+      if (relief === 1) return 6;
+    }
+
     return randomInt(1, 7);
   }
 
@@ -289,7 +304,7 @@ export class LudoRoom {
   executeRoll() {
     clearTimeout(this.turnTimer);
     clearTimeout(this.transitionTimer);
-    const val = this.rollDie();
+    const val = this.rollDie(this.state.currentPlayer);
     this.state.rollSeq += 1;
     const rollId = this.state.rollSeq;
     this.state.lastRoll = {

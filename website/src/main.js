@@ -1043,11 +1043,24 @@ resize();
 // ═══════════════════════════════════════════
 function getPos(e) {
   const rect = canvas.getBoundingClientRect();
-  const touch = e.touches?.[0] || e.changedTouches?.[0] || e;
+
+  // ✅ Touch events handle karo properly
+  let clientX, clientY;
+
+  if (e.touches && e.touches.length > 0) {
+    clientX = e.touches[0].clientX;
+    clientY = e.touches[0].clientY;
+  } else if (e.changedTouches && e.changedTouches.length > 0) {
+    clientX = e.changedTouches[0].clientX;
+    clientY = e.changedTouches[0].clientY;
+  } else {
+    clientX = e.clientX;
+    clientY = e.clientY;
+  }
 
   return [
-    (touch.clientX - rect.left) * (SCREEN_W / rect.width),
-    (touch.clientY - rect.top) * (SCREEN_H / rect.height),
+    (clientX - rect.left) * (SCREEN_W / rect.width),
+    (clientY - rect.top) * (SCREEN_H / rect.height),
   ];
 }
 
@@ -1075,14 +1088,28 @@ function sendMyChatMessage(text) {
   network.sendChat(message, pName, PLAYER_COLORS[pColor]);
 }
 
+// ✅ Double-touch prevention
+let lastInputTime = 0;
+const INPUT_COOLDOWN = 350; // ms
+
 function handleInput(e, type = "up") {
-  // type can be "down" or "up"
+  const now = Date.now();
+
+  // ✅ Cooldown check — double fire prevent karo
+  if (now - lastInputTime < INPUT_COOLDOWN) {
+    console.log("🚫 Input ignored (cooldown)");
+    return;
+  }
+  lastInputTime = now;
+
+  if (e.cancelable && e.target === canvas) e.preventDefault();
+
   const pos = getPos(e);
   if (!pos) return;
   const [sx, sy] = pos;
 
   // Heartbeat to reset server-side auto-turn timer
-  if (network && type === "up") network.sendActivity();
+  if (network) network.sendActivity();
 
   // CALCULATE LOGICAL COORDINATES (UN-ROTATED) FOR BOARD CLICKS
   const bcx = BOARD_X + BOARD_SIZE / 2;
@@ -1093,29 +1120,19 @@ function handleInput(e, type = "up") {
   const lx = bcx + dx * Math.cos(-angle) - dy * Math.sin(-angle);
   const ly = bcy + dx * Math.sin(-angle) + dy * Math.cos(-angle);
 
-  // 1. CHAT FOCUS - Must happen on pointerdown for reliability
-  if (type === "down") {
-    // Check if clicking chat area
-    if (game.chat.visible) {
-      const inputRect = game.chat.getInputRect();
-      if (sx >= inputRect.x && sx <= inputRect.x + inputRect.w &&
-          sy >= inputRect.y && sy <= inputRect.y + inputRect.h) {
-        game.chat.active = true;
-        focusMobileChatInput();
-        return true; // handled
-      }
+  // 1. CHAT FOCUS - Must happen on a user gesture for reliability
+  if (game.chat.visible) {
+    const inputRect = game.chat.getInputRect();
+    if (
+      sx >= inputRect.x &&
+      sx <= inputRect.x + inputRect.w &&
+      sy >= inputRect.y &&
+      sy <= inputRect.y + inputRect.h
+    ) {
+      game.chat.active = true;
+      focusMobileChatInput();
+      return; // handled
     }
-    // Chat button (icon)
-    if (sx >= 48 && sx <= 100 && sy >= SCREEN_H - 60 && sy <= SCREEN_H - 8) {
-      if (!game.chat.visible) {
-        game.chat.visible = true;
-        game.chat.active = true;
-        game.emojiPanel.visible = false;
-        focusMobileChatInput();
-        return true; // handled
-      }
-    }
-    return false;
   }
 
   // 2. JUNCTION CHOICE (Priority #1)
@@ -1149,9 +1166,15 @@ function handleInput(e, type = "up") {
       return;
     }
   }
-  // Chat button (toggle off if already on)
+
+  // Chat button
   if (sx >= 48 && sx <= 100 && sy >= SCREEN_H - 60 && sy <= SCREEN_H - 8) {
-    if (game.chat.visible) {
+    if (!game.chat.visible) {
+      game.chat.visible = true;
+      game.chat.active = true;
+      game.emojiPanel.visible = false;
+      focusMobileChatInput();
+    } else {
       game.chat.visible = false;
       game.chat.active = false;
       mobileChatInput.blur();
@@ -1180,17 +1203,6 @@ function handleInput(e, type = "up") {
       game.chat.visible = false;
       game.chat.active = false;
       mobileChatInput.blur();
-      return;
-    }
-
-    const inputRect = game.chat.getInputRect();
-    const inputClicked =
-      sx >= inputRect.x &&
-      sx <= inputRect.x + inputRect.w &&
-      sy >= inputRect.y &&
-      sy <= inputRect.y + inputRect.h;
-    if (inputClicked) {
-      // Already handled in pointerdown
       return;
     }
 
@@ -1253,24 +1265,21 @@ function handleInput(e, type = "up") {
     const [avX, avY] = av.position;
     const isTop = game.getVisualIndex(p) <= 1;
     const avR = 30;
-    const badgeY = isTop ? avY - avR - 28 : avY + avR + 12; // Updated to match new badge position
+    const badgeY = isTop ? avY - avR - 28 : avY + avR + 12;
 
-    // enlarge auto/bot badge hitbox for touch
     if (
       sx >= avX - 44 &&
       sx <= avX + 44 &&
       sy >= badgeY - 6 &&
       sy <= badgeY + 34
     ) {
-      // Sirf apna badge click ho sakta hai
       if (p === network.playerColor) {
         const newState = !av.botEnabled;
         network.toggleBot(newState);
-        av.botEnabled = newState; // Instant feedback
+        av.botEnabled = newState;
 
-        // Agar bot off kar raha hai → khud khel raha hai
         if (!newState) {
-          game.gameState = "roll"; // wapis control lo
+          game.gameState = "roll";
         }
       }
       return;
@@ -1311,7 +1320,6 @@ function handleInput(e, type = "up") {
     for (let i = 0; i < game.emojiPanel.emojis.length; i++) {
       const ex = exBase + pad + (i % cols) * (size + pad) + size / 2;
       const ey = eyBase + pad + Math.floor(i / cols) * (size + pad) + size / 2;
-      // enlarge emoji hitbox for touch
       if (
         Math.abs(sx - ex) < size / 2 + 10 &&
         Math.abs(sy - ey) < size / 2 + 10
@@ -1327,6 +1335,8 @@ function handleInput(e, type = "up") {
     }
   }
 }
+
+
 
 function isEventInsideChatUI(e) {
   const t = e?.target;
@@ -1357,89 +1367,27 @@ function unlockMobileAudioOnce() {
   }
 }
 
-/**
- * Unified mobile/touch + pointer handling:
- * - pointerdown/pointerup first (works in Chrome Android + Samsung + modern Safari with PointerEvents)
- * - touchstart/touchend fallback
- * - keep click as fallback only (desktop + older browsers)
- *
- * Goal: taps behave like desktop clicks without 300ms delay.
- */
-let lastInputFireAt = 0;
-function fireHandleInputFromEvent(e, type = "up") {
-  const now = Date.now();
-  // Don't debounce pointerdown, only pointerup/click
-  if (type === "up" && now - lastInputFireAt < 100) return;
-  if (type === "up") lastInputFireAt = now;
 
+
+// Touch handler (primary on mobile)
+canvas.addEventListener("touchstart", (e) => {
   unlockMobileAudioOnce();
+  if (game?.chat?.active && isEventInsideChatUI(e)) return;
+  e.preventDefault(); // ← prevents subsequent 'click' event
+  handleInput(e);
+}, { passive: false, capture: false });
 
-  // If chat input is active, don't let the canvas handler swallow the tap/click that should focus the input.
+// Click handler (desktop only — skip if touch was recent)
+canvas.addEventListener("click", (e) => {
+  unlockMobileAudioOnce();
   if (game?.chat?.active && isEventInsideChatUI(e)) return;
 
-  handleInput(e, type);
-}
+  // ✅ If touch happened recently, skip click (it's a duplicate)
+  const now = Date.now();
+  if (now - lastInputTime < INPUT_COOLDOWN) return;
 
-const supportsPointerEvents = typeof window !== "undefined" && "PointerEvent" in window;
-if (supportsPointerEvents) {
-  canvas.addEventListener(
-    "pointerdown",
-    (e) => {
-      if (e.isPrimary === false) return;
-      // For mouse, we use click listener to maintain desktop feel
-      if (e.pointerType === "mouse") return;
-      fireHandleInputFromEvent(e, "down");
-    },
-    { passive: true },
-  );
-
-  canvas.addEventListener(
-    "pointerup",
-    (e) => {
-      if (e.isPrimary === false) return;
-      if (e.pointerType === "mouse") return;
-      fireHandleInputFromEvent(e, "up");
-    },
-    { passive: true },
-  );
-} else {
-  canvas.addEventListener(
-    "touchstart",
-    (e) => {
-      fireHandleInputFromEvent(e, "down");
-    },
-    { passive: true },
-  );
-
-  canvas.addEventListener(
-    "touchend",
-    (e) => {
-      e.preventDefault();
-      fireHandleInputFromEvent(e, "up");
-    },
-    { passive: false },
-  );
-}
-
-// Desktop compatibility
-canvas.addEventListener(
-  "mousedown",
-  (e) => {
-    fireHandleInputFromEvent(e, "down");
-  },
-  { passive: true },
-);
-
-canvas.addEventListener(
-  "click",
-  (e) => {
-    // Only fire for actual mouse clicks or if no touch handled recently
-    const now = Date.now();
-    if (now - lastInputFireAt < 100) return;
-    fireHandleInputFromEvent(e, "up");
-  },
-  { passive: true },
-);
+  handleInput(e);
+}, { passive: false });
 
 mobileChatInput.addEventListener("input", () => {
   game.chat.inputText = mobileChatInput.value;
