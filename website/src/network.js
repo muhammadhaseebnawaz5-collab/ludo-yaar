@@ -2,57 +2,20 @@ export class NetworkManager {
   constructor(gameInstance) {
     this.game = gameInstance;
 
-    // Track last real user gesture to prevent iOS Safari getUserMedia blocks
-    this._lastUserGestureAt = 0;
-    const markGesture = () => {
-      this._lastUserGestureAt = Date.now();
-    };
-    window.addEventListener("touchstart", markGesture, { passive: true });
-    window.addEventListener("pointerdown", markGesture, { passive: true });
-    window.addEventListener("click", markGesture, { passive: true });
-
-    // Full iOS Safari audio unlock handling
-    this._audioCtx = null;
-    this._audioUnlocked = false;
-
-    window.addEventListener("ludo-audio-unlocked", () => {
-      this.unlockAudioContextAndRetry("event:ludo-audio-unlocked");
-    });
-
-    // Also unlock on first visibility return (in case suspended)
-    document.addEventListener("visibilitychange", () => {
-      if (document.visibilityState === "visible") {
-        this.unlockAudioContextAndRetry("visibilitychange:visible");
-        this.applyRemoteAudioMuteStates();
-      }
-    });
-
-    // Use the global 'io' from the CDN script in index.html
-    this.socket = null;
     if (typeof io !== "undefined") {
-      // In production (Railway), let Socket.io auto-detect the host.
-      // In dev, we might need an explicit URL if the frontend is on a different port.
-      const isDev =
-        typeof import.meta !== "undefined" &&
-        typeof import.meta.env !== "undefined" &&
-        import.meta.env.DEV;
+      const isLocal =
+        window.location.hostname === "localhost" ||
+        window.location.hostname === "127.0.0.1";
+      const socketUrl =
+        isLocal && window.location.port !== "3000"
+          ? "http://localhost:3000"
+          : window.location.origin;
 
-      const socketUrl = isDev ? "http://localhost:3000" : undefined;
-      console.log(
-        "🔌 Connecting to socket server:",
-        socketUrl || "Default (Same Origin)",
-      );
-
-      this.socket = io(socketUrl, {
-        reconnection: true,
-        reconnectionAttempts: 10,
-        reconnectionDelay: 1000,
-        timeout: 20000,
-      });
+      console.log("🔌 Attempting to connect to socket server:", socketUrl);
+      this.socket = io(socketUrl);
+      this.setupSocketEvents(); // ✅ Sirf EK baar
     } else {
-      console.error(
-        "❌ Socket.io not found! The game will not be able to connect to the server.",
-      );
+      console.error("❌ Socket.io not found!");
     }
 
     this.roomId = localStorage.getItem("ludoRoomId") || null;
@@ -61,19 +24,19 @@ export class NetworkManager {
     this.playerColor = null;
 
     this.peers = {};
-    this.dataChannels = {}; // sessionId -> RTCDataChannel
-    this.remoteAudioEls = {}; // socketId -> HTMLAudioElement
-    this.socketIds = {}; // color -> socketId
-    this.socketIdColors = {}; // socketId -> color
+    this.dataChannels = {};
+    this.remoteAudioEls = {};
+    this.socketIds = {};
+    this.socketIdColors = {};
     this.localStream = null;
     this.isMicOn = false;
     this.globalSpeakerEnabled = true;
     this.mutedPlayerColors = new Set();
 
     this.onFriendInvite = null;
-    this.onAutoRejoin = null; // callback for auto-rejoin attempts
+    this.onAutoRejoin = null;
 
-    this.setupSocketEvents();
+    // ❌ REMOVED: this.setupSocketEvents(); — was causing duplicate events
   }
 
   _genUUID() {
@@ -408,109 +371,57 @@ export class NetworkManager {
   }
 
   async toggleMic() {
-    // iOS Safari: getUserMedia must come from a real user gesture
-    const now = Date.now();
-    const gestureRecent = now - this._lastUserGestureAt < 1500;
-    if (!gestureRecent) {
-      console.warn("🎤 toggleMic blocked: no recent user gesture");
-      return false;
-    }
-
-    if (!navigator.mediaDevices?.getUserMedia) {
-      console.error("❌ mediaDevices.getUserMedia not available on this browser.");
-      return false;
-    }
-
-    const secureOk =
-      window.isSecureContext ||
-      location.protocol === "https:" ||
-      location.hostname === "localhost";
-    if (!secureOk) {
-      console.error("❌ Microphone requires HTTPS/secure context.");
-      return false;
-    }
-
-    // Turning mic OFF
-    if (this.localStream && this.isMicOn) {
-      this.isMicOn = false;
+    if (!this.localStream) {
       try {
-        this.localStream.getAudioTracks().forEach((t) => {
-          t.enabled = false;
+        this.localStream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+            sampleRate: 48000,
+          },
         });
-        // Stop tracks to release mic on iOS
-        this.localStream.getTracks().forEach((t) => t.stop());
-      } catch {
-        // ignore
-      }
-      this.localStream = null;
-      this.broadcastVoiceStatus();
-      return false;
-    }
 
-    // Turning mic ON
-    if (this.localStream) {
-      // stream exists but mic off -> re-enable
-      this.isMicOn = true;
-      try {
-        this.localStream.getAudioTracks().forEach((t) => (t.enabled = true));
-      } catch {
-        this.localStream = null;
-      }
-      this.broadcastVoiceStatus();
-      this.addLocalTracksToPeers();
-      return true;
-    }
+        // ✅ Track enable karo
+        this.localStream.getAudioTracks().forEach((track) => {
+          track.enabled = true;
+        });
 
-    // Re-request mic, with a small delay to help iOS permission flow settle
-    try {
-      console.log("🎤 Requesting microphone access...");
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          // Mobile browsers often ignore/partially support { ideal: true }.
-          // Use strict booleans instead.
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
-      });
+        // ✅ NEVER play own audio — properly prevent echo
+        // Don't create Audio element for local stream at all
+        // (previous code created localAudio with muted=true but autoplay=true
+        //  which caused browser to sometimes unmute it)
 
-      // iOS may return immediately but tracks might be disabled briefly
-      await new Promise((r) => setTimeout(r, 150));
+        this.isMicOn = true;
+        this.broadcastVoiceStatus();
+        this.addLocalTracksToPeers();
 
-      const audioTracks = stream.getAudioTracks();
-      if (!audioTracks.length) {
-        console.error("❌ No audio tracks returned from getUserMedia.");
-        stream.getTracks().forEach((t) => t.stop());
+        // Connect to existing peers
+        Object.values(this.socketIds).forEach((sid) => {
+          if (sid !== this.socket.id && !this.peers[sid]) {
+            this.createPeerConnection(sid, true);
+          }
+        });
+      } catch (e) {
+        console.error("Mic access denied", e);
         return false;
       }
-
-      audioTracks.forEach((track) => {
-        track.enabled = true;
+    } else {
+      // Toggle existing mic
+      this.isMicOn = !this.isMicOn;
+      this.localStream.getAudioTracks().forEach((track) => {
+        track.enabled = this.isMicOn;
       });
 
-      this.localStream = stream;
-      this.isMicOn = true;
-
-      console.log("🎤 Mic ON - track enabled:", audioTracks[0]?.enabled);
+      // ✅ Agar mic off ho raha hai permanently — stream stop karo
+      if (!this.isMicOn) {
+        // Don't stop tracks fully (so re-enable works without getUserMedia again)
+        // Just disable is enough
+      }
 
       this.broadcastVoiceStatus();
-      this.addLocalTracksToPeers();
-
-      Object.values(this.socketIds).forEach((sid) => {
-        if (sid !== this.socket?.id && !this.peers[sid]) {
-          this.createPeerConnection(sid, true);
-        }
-      });
-
-      return true;
-    } catch (e) {
-      // DeniedPermissionsError etc.
-      console.warn("❌ Mic permission error:", e?.name || e, e);
-      this.isMicOn = false;
-      this.localStream = null;
-      this.broadcastVoiceStatus();
-      return false;
     }
+    return this.isMicOn;
   }
 
   broadcastVoiceStatus() {
@@ -547,10 +458,7 @@ export class NetworkManager {
 
   applyRemoteAudioMuteState(socketId) {
     const audio = this.remoteAudioEls[socketId];
-    if (!audio) {
-      console.debug("⚠️ Audio element not found for", socketId);
-      return;
-    }
+    if (!audio) return;
 
     const color = this.socketIdColors[socketId];
     const muted =
@@ -559,37 +467,30 @@ export class NetworkManager {
 
     audio.muted = muted;
 
-    // If we are actively sending mic audio, cut remote playback volume
-    // to reduce speaker→mic feedback loops (major mobile echo trigger).
-    const volumeWhenUnmuted = this.isMicOn ? 0.25 : 0.8;
-    audio.volume = muted ? 0 : volumeWhenUnmuted;
-
-    // Important: Do NOT pause() on mute for Safari/WebRTC stability.
-    // We only toggle muted + track.enabled.
     if (audio.srcObject) {
-      try {
-        audio.srcObject.getAudioTracks().forEach((track) => {
-          track.enabled = !muted;
-        });
-      } catch (e) {
-        console.warn("🔊 applyRemoteAudioMuteState track toggle failed:", e);
-      }
+      audio.srcObject.getAudioTracks().forEach((track) => {
+        track.enabled = !muted;
+      });
     }
 
-    if (!muted) {
-      // Force play after srcObject assignment/unmute
-      this.unlockAudioContextAndRetry(`audio-unmute:${socketId}`);
-      audio
-        .play()
+    if (muted) {
+      // ✅ FIX: Volume 0 set karo BEFORE pause to prevent click/beep sound
+      audio.volume = 0;
+      audio.pause();
+    } else {
+      // ✅ FIX: Gradually ramp up volume to prevent beep on unmute
+      audio.volume = 0;
+      audio.play()
         .then(() => {
-          // ok
+          // Smooth volume ramp up (prevents pop/beep)
+          let vol = 0;
+          const ramp = setInterval(() => {
+            vol = Math.min(vol + 0.1, 0.85);
+            audio.volume = vol;
+            if (vol >= 0.85) clearInterval(ramp);
+          }, 30);
         })
-        .catch((e) => {
-          console.warn("🔊 Audio play blocked (retry later):", e?.name || e, socketId);
-          setTimeout(() => {
-            audio.play().catch(() => {});
-          }, 600);
-        });
+        .catch((e) => console.debug("Audio play deferred:", e));
     }
   }
 
@@ -623,44 +524,27 @@ export class NetworkManager {
   }
 
   createPeerConnection(targetSocketId, isInitiator) {
+    // ✅ Hard protection against duplicates
     if (this.peers[targetSocketId]) {
       console.warn("Peer already exists, skipping:", targetSocketId);
       return;
     }
 
-    // TURN is crucial for mobile networks/NAT that can't do STUN-only.
+    // ✅ Don't connect to yourself
+    if (targetSocketId === this.socket.id) {
+      console.warn("Skipping self-connection");
+      return;
+    }
+
     const pc = new RTCPeerConnection({
       iceServers: [
         { urls: "stun:stun.l.google.com:19302" },
         { urls: "stun:stun1.l.google.com:19302" },
-        { urls: "stun:stun2.l.google.com:19302" },
-        { urls: "stun:stun3.l.google.com:19302" },
-        { urls: "stun:stun4.l.google.com:19302" },
-        { urls: "stun:global.stun.twilio.com:3478" },
-        // Public TURN fallback (may still be rate-limited). Replace with your own in prod.
-        {
-          urls: "turn:global-turn.metered.ca:80?transport=udp",
-          username: "anonymous",
-          credential: "anonymous",
-        },
-        {
-          urls: "turn:global-turn.metered.ca:443?transport=tcp",
-          username: "anonymous",
-          credential: "anonymous",
-        },
       ],
     });
     this.peers[targetSocketId] = pc;
 
-    // 🔧 FIX: Add local audio tracks BEFORE creating offer (so they're included in SDP)
-    if (this.localStream) {
-      const audioTrack = this.localStream.getAudioTracks()[0];
-      if (audioTrack) {
-        console.log("🎤 Adding local audio track to peer:", targetSocketId);
-        pc.addTrack(audioTrack, this.localStream);
-      }
-    }
-
+    // Data Channel for Chat
     if (isInitiator) {
       const dc = pc.createDataChannel("chat");
       this.setupDataChannel(targetSocketId, dc);
@@ -681,73 +565,83 @@ export class NetworkManager {
     };
 
     pc.ontrack = (event) => {
-      console.log(`🎵 Received remote track from ${targetSocketId}`);
+      console.log("🎵 Received remote audio from", targetSocketId);
+
+      // ✅ FIX: Never play your own audio back
+      if (targetSocketId === this.socket.id) {
+        console.warn("Skipping self audio track");
+        return;
+      }
+
       const remoteStream = event.streams[0];
       if (!remoteStream) return;
 
       let audio = this.remoteAudioEls[targetSocketId];
+
       if (!audio) {
-        audio = document.createElement("audio");
-        audio.id = `audio-${targetSocketId}`;
+        audio = new Audio();
         audio.autoplay = true;
-
-        // iOS/Safari inline playback attributes
-        audio.setAttribute("playsinline", "true");
-        audio.setAttribute("webkit-playsinline", "true");
         audio.playsInline = true;
-
-        // Avoid display:none which can break iOS playback. Use 1px hidden instead.
-        audio.style.opacity = "0";
-        audio.style.position = "absolute";
-        audio.style.left = "-9999px";
-        audio.style.top = "0";
-        audio.style.width = "1px";
-        audio.style.height = "1px";
-        audio.style.pointerEvents = "none";
-
-        document.body.appendChild(audio);
-        console.log("📍 Audio element appended to DOM:", audio.id);
-
+        audio.volume = 0.85;
+        audio.muted = false;
         this.remoteAudioEls[targetSocketId] = audio;
       }
 
+      // ✅ FIX: Replace stream instead of returning if already set
+      // (prevents stale stream playing alongside new one)
       if (audio.srcObject !== remoteStream) {
+        audio.pause();
+        audio.srcObject = null;
         audio.srcObject = remoteStream;
-        console.log("🎧 Audio stream set for", targetSocketId);
+        console.log("🔄 Stream updated for", targetSocketId);
+      }
 
-        // Ensure audio element play after srcObject assignment
-        this.applyRemoteAudioMuteState(targetSocketId);
-        this.unlockAudioContextAndRetry(`audio-src:${targetSocketId}`);
+      this.applyRemoteAudioMuteState(targetSocketId);
 
-        audio
-          .play()
-          .then(() => {
-            console.log("🔊 Remote audio play OK:", targetSocketId);
-          })
-          .catch((e) => {
-            console.warn("🔊 Remote audio play failed:", e?.name || e, targetSocketId);
-          });
+      // ✅ Safe play with user gesture handling
+      const playPromise = audio.play();
+      if (playPromise) {
+        playPromise.catch((e) => {
+          console.debug("Audio autoplay blocked:", e);
+          // Will play on next user interaction
+          const playOnInteraction = () => {
+            audio.play().catch(() => {});
+            document.removeEventListener("pointerup", playOnInteraction);
+          };
+          document.addEventListener("pointerup", playOnInteraction);
+        });
       }
     };
 
     pc.oniceconnectionstatechange = () => {
-      console.log(
-        `ICE Connection State [${targetSocketId}]: ${pc.iceConnectionState}`,
-      );
+      console.log(`ICE [${targetSocketId}]: ${pc.iceConnectionState}`);
+      if (pc.iceConnectionState === "failed") {
+        console.warn("ICE failed, restarting...");
+        pc.restartIce();
+      }
     };
 
     pc.onconnectionstatechange = () => {
-      console.log(
-        `Connection State [${targetSocketId}]: ${pc.connectionState}`,
-      );
+      console.log(`Connection [${targetSocketId}]: ${pc.connectionState}`);
       if (
         pc.connectionState === "failed" ||
-        pc.connectionState === "closed" ||
-        pc.connectionState === "disconnected"
+        pc.connectionState === "closed"
       ) {
         this.cleanupPeerConnection(targetSocketId);
       }
     };
+
+    // ✅ Add local tracks if mic is already on
+    if (this.localStream) {
+      this.localStream.getAudioTracks().forEach((track) => {
+        const alreadyAdded = pc
+          .getSenders()
+          .find((s) => s.track === track);
+        if (!alreadyAdded) {
+          pc.addTrack(track, this.localStream);
+        }
+      });
+    }
 
     if (isInitiator) {
       pc.createOffer()
@@ -758,8 +652,8 @@ export class NetworkManager {
             toSocketId: targetSocketId,
             signal: pc.localDescription,
           });
-          console.log("📤 Offer sent to", targetSocketId);
-        });
+        })
+        .catch((e) => console.error("Offer creation failed:", e));
     }
   }
 

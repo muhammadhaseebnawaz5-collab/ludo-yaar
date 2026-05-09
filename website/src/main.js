@@ -37,24 +37,8 @@ function setCanvasInteractivity(enabled) {
 // Default: lobby UI active, block canvas clicks
 setCanvasInteractivity(false);
 
-/** =========================================================
- * Universal button touch fix (mobile compatibility)
- * - pointerup event delegation triggers native .click()
- * - uses timestamp guard to reduce double-trigger issues
- * ========================================================= */
+// Global state for tap/click management
 let __ludoLastTapAt = 0;
-document.addEventListener("pointerup", (e) => {
-  const now = Date.now();
-  if (now - __ludoLastTapAt < 200) return;
-  __ludoLastTapAt = now;
-
-  const btn = e.target?.closest?.("button");
-  if (!btn) return;
-
-  // If browser/native click will also fire, this guard helps.
-  // Still, double actions can happen in rare cases due to platform quirks.
-  btn.click();
-});
 
 // Make network globally accessible for debugging
 window.network = network;
@@ -141,7 +125,7 @@ let teamUpMode = false;
 // ═══════════════════════════════════════════
 if (playerCountRow) {
   playerCountRow.querySelectorAll(".count-btn").forEach((btn) => {
-    btn.addEventListener("click", (e) => {
+    btn.addEventListener("pointerup", (e) => {
       e.preventDefault();
       const count = parseInt(btn.dataset.count);
       if (isNaN(count)) return;
@@ -227,7 +211,8 @@ function updateTeamUpBtnUI() {
   btnTeamUp.style.background = teamUpMode ? "#28A33E" : "#3A1060";
 }
 if (btnTeamUp) {
-  btnTeamUp.addEventListener("click", () => {
+  btnTeamUp.addEventListener("pointerup", (e) => {
+    e.preventDefault();
     teamUpMode = !teamUpMode;
     updateTeamUpBtnUI();
   });
@@ -515,9 +500,9 @@ function confirmBackNavigation() {
   }
 }
 
-if (btnBack) btnBack.addEventListener("click", showBackConfirm);
-if (btnBackNo) btnBackNo.addEventListener("click", hideBackConfirm);
-if (btnBackYes) btnBackYes.addEventListener("click", confirmBackNavigation);
+if (btnBack) btnBack.addEventListener("pointerup", showBackConfirm);
+if (btnBackNo) btnBackNo.addEventListener("pointerup", hideBackConfirm);
+if (btnBackYes) btnBackYes.addEventListener("pointerup", confirmBackNavigation);
 
 // ═══════════════════════════════════════════
 //  LOBBY — START
@@ -532,24 +517,17 @@ function openJoinPopup() {
 function bindStartButton() {
   if (!btnStart) return;
 
-  // Simplified: single listener, no capture unless needed. 
-  // We use both click and touchend for maximum compatibility but with a debouncer.
-  let lastClickTime = 0;
-  const debouncedHandler = (e) => {
+  const handleStartTap = (e) => {
+    e.preventDefault();
     const now = Date.now();
-    if (now - lastClickTime < 500) return;
-    lastClickTime = now;
+    if (now - __ludoLastTapAt < 500) return;
+    __ludoLastTapAt = now;
     
-    console.log("🔘 Start button clicked/touched");
+    console.log("🔘 Start button pointerup");
     handlePlayWithFriends();
   };
 
-  btnStart.addEventListener("click", debouncedHandler);
-  btnStart.addEventListener("touchend", (e) => {
-    // Prevent double fire with click
-    e.preventDefault(); 
-    debouncedHandler(e);
-  }, { passive: false });
+  btnStart.addEventListener("pointerup", handleStartTap);
 }
 
 bindStartButton();
@@ -564,7 +542,8 @@ window.__ludoStart = () => {
 //  LOBBY — VS COMPUTER
 // ═══════════════════════════════════════════
 if (btnVsComputer) {
-  btnVsComputer.addEventListener("click", () => {
+  btnVsComputer.addEventListener("pointerup", (e) => {
+    e.preventDefault();
     const name = playerNameInput.value.trim() || "Player";
     localStorage.setItem("ludoLastName", name);
     startLocalGame(selectedCount);
@@ -574,11 +553,14 @@ if (btnVsComputer) {
 // ═══════════════════════════════════════════
 //  LOBBY — JOIN (open popup)
 // ═══════════════════════════════════════════
-if (btnOpenJoin) btnOpenJoin.addEventListener("click", openJoinPopup);
+if (btnOpenJoin) btnOpenJoin.addEventListener("pointerup", openJoinPopup);
 if (btnCloseJoin)
-  btnCloseJoin.addEventListener("click", () => hidePopup(joinPopup));
+  btnCloseJoin.addEventListener("pointerup", (e) => {
+    e.preventDefault();
+    hidePopup(joinPopup);
+  });
 
-if (btnConfirmJoin) btnConfirmJoin.addEventListener("click", attemptJoin);
+if (btnConfirmJoin) btnConfirmJoin.addEventListener("pointerup", attemptJoin);
 if (joinCodeInput)
   joinCodeInput.addEventListener("keydown", (e) => {
     if (e.key === "Enter") attemptJoin();
@@ -768,7 +750,8 @@ function updateWaitSlots(slots) {
 
 // Copy code
 if (btnCopyCode && displayTableCode) {
-  btnCopyCode.addEventListener("click", () => {
+  btnCopyCode.addEventListener("pointerup", (e) => {
+    e.preventDefault();
     const code = displayTableCode.textContent;
     navigator.clipboard.writeText(code).then(() => {
       copyConfirm?.classList.remove("hidden");
@@ -779,7 +762,8 @@ if (btnCopyCode && displayTableCode) {
 
 // Share
 if (btnShare && displayTableCode)
-  btnShare.addEventListener("click", () => {
+  btnShare.addEventListener("pointerup", (e) => {
+    e.preventDefault();
     const code = displayTableCode.textContent;
     const url = `${location.origin}?join=${code}`;
     if (navigator.share) {
@@ -802,7 +786,8 @@ if (btnShare && displayTableCode)
   });
 
 // Host: manual start
-btnStartGame.addEventListener("click", () => {
+btnStartGame.addEventListener("pointerup", (e) => {
+  e.preventDefault();
   if (network.socket && network.socket.connected) {
     network.startGame();
   } else {
@@ -844,13 +829,18 @@ function addFriend(name, colorIndex, uuid) {
 
 // Open friends popup
 if (btnInviteFriends) {
-  btnInviteFriends.addEventListener("click", () => {
+  btnInviteFriends.addEventListener("pointerup", (e) => {
+    e.preventDefault();
     renderFriendsList();
     showPopup(friendsPopup);
   });
 }
-if (btnCloseFriends)
-  btnCloseFriends.addEventListener("click", () => hidePopup(friendsPopup));
+if (btnCloseFriends) {
+  btnCloseFriends.addEventListener("pointerup", (e) => {
+    e.preventDefault();
+    hidePopup(friendsPopup);
+  });
+}
 
 if (friendSearchInput)
   friendSearchInput.addEventListener("input", renderFriendsList);
@@ -892,7 +882,8 @@ function renderFriendsList(onlineSessions) {
                 <button class="fi-invite-btn" ${!isOnline ? "disabled" : ""} data-uuid="${f.uuid}">
                     ${isOnline ? "Invite" : "Offline"}
                 </button>`;
-      li.querySelector(".fi-invite-btn").addEventListener("click", () => {
+      li.querySelector(".fi-invite-btn").addEventListener("pointerup", (e) => {
+        e.preventDefault();
         inviteFriend(f);
         li.querySelector(".fi-invite-btn").textContent = "Sent ✓";
         li.querySelector(".fi-invite-btn").disabled = true;
@@ -968,7 +959,8 @@ network.onFriendInvite = function ({ senderName, senderColor, roomId }) {
   );
 };
 
-btnAcceptInvite.addEventListener("click", () => {
+btnAcceptInvite.addEventListener("pointerup", (e) => {
+  e.preventDefault();
   if (!pendingInvite) return;
   inviteBanner.classList.add("hidden");
   const name = playerNameInput.value.trim() || "Player";
@@ -987,7 +979,8 @@ btnAcceptInvite.addEventListener("click", () => {
   pendingInvite = null;
 });
 
-btnDeclineInvite.addEventListener("click", () => {
+btnDeclineInvite.addEventListener("pointerup", (e) => {
+  e.preventDefault();
   inviteBanner.classList.add("hidden");
   pendingInvite = null;
 });
@@ -1082,16 +1075,14 @@ function sendMyChatMessage(text) {
   network.sendChat(message, pName, PLAYER_COLORS[pColor]);
 }
 
-function handleInput(e) {
-  // Do NOT preventDefault() on canvas interactions globally.
-  // On iOS/Safari, canceling can interfere with focusing the hidden chat input proxy
-  // (which is required for the keyboard to open).
+function handleInput(e, type = "up") {
+  // type can be "down" or "up"
   const pos = getPos(e);
   if (!pos) return;
   const [sx, sy] = pos;
 
   // Heartbeat to reset server-side auto-turn timer
-  if (network) network.sendActivity();
+  if (network && type === "up") network.sendActivity();
 
   // CALCULATE LOGICAL COORDINATES (UN-ROTATED) FOR BOARD CLICKS
   const bcx = BOARD_X + BOARD_SIZE / 2;
@@ -1102,7 +1093,32 @@ function handleInput(e) {
   const lx = bcx + dx * Math.cos(-angle) - dy * Math.sin(-angle);
   const ly = bcy + dx * Math.sin(-angle) + dy * Math.cos(-angle);
 
-  // 1. JUNCTION CHOICE (Priority #1)
+  // 1. CHAT FOCUS - Must happen on pointerdown for reliability
+  if (type === "down") {
+    // Check if clicking chat area
+    if (game.chat.visible) {
+      const inputRect = game.chat.getInputRect();
+      if (sx >= inputRect.x && sx <= inputRect.x + inputRect.w &&
+          sy >= inputRect.y && sy <= inputRect.y + inputRect.h) {
+        game.chat.active = true;
+        focusMobileChatInput();
+        return true; // handled
+      }
+    }
+    // Chat button (icon)
+    if (sx >= 48 && sx <= 100 && sy >= SCREEN_H - 60 && sy <= SCREEN_H - 8) {
+      if (!game.chat.visible) {
+        game.chat.visible = true;
+        game.chat.active = true;
+        game.emojiPanel.visible = false;
+        focusMobileChatInput();
+        return true; // handled
+      }
+    }
+    return false;
+  }
+
+  // 2. JUNCTION CHOICE (Priority #1)
   if (game.gameState === "junction") {
     const junctionChoice = game.junctionArrows.handleClick(sx, sy);
     if (junctionChoice !== null) {
@@ -1133,11 +1149,13 @@ function handleInput(e) {
       return;
     }
   }
-  // Chat button (increase touch target)
+  // Chat button (toggle off if already on)
   if (sx >= 48 && sx <= 100 && sy >= SCREEN_H - 60 && sy <= SCREEN_H - 8) {
-    game.chat.visible = !game.chat.visible;
-    game.chat.active = game.chat.visible;
-    game.emojiPanel.visible = false;
+    if (game.chat.visible) {
+      game.chat.visible = false;
+      game.chat.active = false;
+      mobileChatInput.blur();
+    }
     return;
   }
 
@@ -1172,8 +1190,7 @@ function handleInput(e) {
       sy >= inputRect.y &&
       sy <= inputRect.y + inputRect.h;
     if (inputClicked) {
-      game.chat.active = true;
-      focusMobileChatInput();
+      // Already handled in pointerdown
       return;
     }
 
@@ -1349,17 +1366,18 @@ function unlockMobileAudioOnce() {
  * Goal: taps behave like desktop clicks without 300ms delay.
  */
 let lastInputFireAt = 0;
-function fireHandleInputFromEvent(e) {
+function fireHandleInputFromEvent(e, type = "up") {
   const now = Date.now();
-  if (now - lastInputFireAt < 80) return; // debounce double-fires
-  lastInputFireAt = now;
+  // Don't debounce pointerdown, only pointerup/click
+  if (type === "up" && now - lastInputFireAt < 100) return;
+  if (type === "up") lastInputFireAt = now;
 
   unlockMobileAudioOnce();
 
   // If chat input is active, don't let the canvas handler swallow the tap/click that should focus the input.
   if (game?.chat?.active && isEventInsideChatUI(e)) return;
 
-  handleInput(e);
+  handleInput(e, type);
 }
 
 const supportsPointerEvents = typeof window !== "undefined" && "PointerEvent" in window;
@@ -1367,13 +1385,10 @@ if (supportsPointerEvents) {
   canvas.addEventListener(
     "pointerdown",
     (e) => {
-      // Only primary touch/mouse/stylus
       if (e.isPrimary === false) return;
-      // Prevent mouse emulation from triggering our handler twice
+      // For mouse, we use click listener to maintain desktop feel
       if (e.pointerType === "mouse") return;
-      // DO NOT preventDefault() here:
-      // On iOS/Safari it can interfere with focusing the hidden proxy input
-      // (which is needed to open the keyboard).
+      fireHandleInputFromEvent(e, "down");
     },
     { passive: true },
   );
@@ -1382,45 +1397,48 @@ if (supportsPointerEvents) {
     "pointerup",
     (e) => {
       if (e.isPrimary === false) return;
-      // Ignore mouse pointerup (let click fallback handle desktop)
       if (e.pointerType === "mouse") return;
-      // IMPORTANT: do NOT preventDefault() here.
-      // On iOS/Safari, preventDefault on pointer/touch can block keyboard opening for programmatic focus.
-      fireHandleInputFromEvent(e);
+      fireHandleInputFromEvent(e, "up");
     },
     { passive: true },
   );
 } else {
-  // Fallback for very old browsers: touchstart/touchend
-  // - touchstart: block scroll/gesture so the tap isn't swallowed
-  // - touchend: actually fire the same logic as click/pointerup
   canvas.addEventListener(
     "touchstart",
     (e) => {
-      e.preventDefault();
+      fireHandleInputFromEvent(e, "down");
     },
-    { passive: false },
+    { passive: true },
   );
 
   canvas.addEventListener(
     "touchend",
     (e) => {
       e.preventDefault();
-      fireHandleInputFromEvent(e);
+      fireHandleInputFromEvent(e, "up");
     },
     { passive: false },
   );
 }
 
-// Desktop + older fallback
+// Desktop compatibility
+canvas.addEventListener(
+  "mousedown",
+  (e) => {
+    fireHandleInputFromEvent(e, "down");
+  },
+  { passive: true },
+);
+
 canvas.addEventListener(
   "click",
   (e) => {
-    // On mobile we already handle touch/pointer. If this is a mobile-emulated click, ignore.
-    // pointerType won't be present on click, so rely on recent timestamp debounce.
-    fireHandleInputFromEvent(e);
+    // Only fire for actual mouse clicks or if no touch handled recently
+    const now = Date.now();
+    if (now - lastInputFireAt < 100) return;
+    fireHandleInputFromEvent(e, "up");
   },
-  { passive: false },
+  { passive: true },
 );
 
 mobileChatInput.addEventListener("input", () => {

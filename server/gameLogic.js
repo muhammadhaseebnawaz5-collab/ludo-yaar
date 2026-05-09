@@ -314,9 +314,14 @@ export class LudoRoom {
         // 🎲 TRIPLE SIX RULE: If this is the 3rd six, end turn immediately
         if (sixCount >= 2) {
           // Already have 2 sixes, this would be the 3rd
-          console.log(
-            `🚫 TRIPLE SIX! Player ${this.state.currentPlayer} turn ends.`,
-          );
+          this.broadcast("chat-message", {
+            message: {
+              sender: "Game",
+              text: `🚫 Triple 6! ${this.players.find(p => p.colorIndex === this.state.currentPlayer)?.name || "Player"} turn cancelled.`,
+              color: "#FFD700",
+              timestamp: Date.now()
+            }
+          });
           this.state.rollQueue = [];
           this.nextTurn();
           return;

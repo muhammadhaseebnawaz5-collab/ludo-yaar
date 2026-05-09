@@ -480,8 +480,8 @@ export class LudoGame {
         pt.forEach((t) => {
           t.update();
           t.isCurrentPlayer = p === this.currentPlayer;
-          // FIX: check ALL rolls in queue, not just first
-          if (t.isCurrentPlayer && this.rollQueue.length > 0) {
+          // STRICT: Only allow movement during 'move' state
+          if (t.isCurrentPlayer && this.gameState === "move" && this.rollQueue.length > 0) {
             t.isMoveable = this.rollQueue.some((r) => this.canTokenMove(t, r));
           } else {
             t.isMoveable = false;
@@ -1253,7 +1253,11 @@ export class LudoGame {
       const sixCount = this.rollQueue.filter((v) => v === 6).length;
 
       if (sixCount >= 3) {
-        // Teen 6 = turn khatam
+        this.chat.addMessage(
+          "Game",
+          `🚫 Triple 6! ${PLAYER_NAMES[this.currentPlayer]} turn cancelled.`,
+          COLORS.GOLD,
+        );
         this.rollQueue = [];
         this.nextTurn();
         return;
@@ -1291,12 +1295,8 @@ export class LudoGame {
   }
 
   handleTokenClick(x, y) {
-    // ALLOW CLICK IF IN 'move' OR IF 'roll' BUT WE HAVE DICE READY (like after a 6)
-    if (
-      this.gameState !== "move" &&
-      (this.gameState !== "roll" || this.rollQueue.length === 0)
-    )
-      return;
+    // STRICT: Token movement should happen ONLY after dice rolling is finished.
+    if (this.gameState !== "move") return;
 
     const pIndex = this.currentPlayer;
     const playerTokens = this.tokens[pIndex];
