@@ -373,48 +373,53 @@ export class NetworkManager {
   async toggleMic() {
     if (!this.localStream) {
       try {
-        // ✅ Mobile-optimized constraints
         const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 
-        const constraints = {
+        this.localStream = await navigator.mediaDevices.getUserMedia({
           audio: {
-            echoCancellation: { ideal: true },
-            noiseSuppression: { ideal: true },
-            autoGainControl: { ideal: true },
-            googEchoCancellation: true, // Chrome specific
-            googAutoGainControl: true, // Chrome specific
-            googNoiseSuppression: true, // Chrome specific
-            googHighpassFilter: true, // Chrome specific
-            // ✅ Mobile pe lower sample rate (reduces feedback)
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+            channelCount: 1,
             sampleRate: isMobile ? 16000 : 48000,
-            channelCount: 1, // Mono (less feedback on mobile)
           },
-        };
-
-        this.localStream = await navigator.mediaDevices.getUserMedia(constraints);
+        });
 
         this.localStream.getAudioTracks().forEach((track) => {
           track.enabled = true;
-          console.log("🎤 Mic track settings:", track.getSettings());
         });
 
-        // ✅ NEVER create Audio element for local stream
-        // (even muted=true autoplay can cause echo on some browsers)
+        // ✅ LOCAL AUDIO — muted play (browser needs this for proper routing)
+        if (this._localAudioEl) {
+          this._localAudioEl.pause();
+          this._localAudioEl = null;
+        }
+        const localAudio = new Audio();
+        localAudio.srcObject = this.localStream;
+        localAudio.muted = true;      // ✅ muted = apni awaaz nahi sunenge
+        localAudio.volume = 0;
+        localAudio.autoplay = false;  // ✅ autoplay OFF
+        this._localAudioEl = localAudio;
 
         this.isMicOn = true;
         this.broadcastVoiceStatus();
+
+        // ✅ YE LINE ZAROORI HAI — existing peers mein track add karo
         this.addLocalTracksToPeers();
 
+        // ✅ Naye peers banao jo abhi connected hain
         Object.values(this.socketIds).forEach((sid) => {
           if (sid !== this.socket.id && !this.peers[sid]) {
             this.createPeerConnection(sid, true);
           }
         });
+
       } catch (e) {
         console.error("❌ Mic access denied:", e);
         return false;
       }
     } else {
+      // Toggle
       this.isMicOn = !this.isMicOn;
       this.localStream.getAudioTracks().forEach((track) => {
         track.enabled = this.isMicOn;
@@ -461,59 +466,25 @@ export class NetworkManager {
     if (!audio) return;
 
     const color = this.socketIdColors[socketId];
-    const shouldMute =
+    const muted =
       !this.globalSpeakerEnabled ||
       (color !== undefined && this.mutedPlayerColors.has(color));
 
-    if (shouldMute) {
-      // ✅ Smooth mute — no abrupt cut (prevents beep)
-      const fadeOut = setInterval(() => {
-        if (audio.volume > 0.05) {
-          audio.volume = Math.max(0, audio.volume - 0.15);
-        } else {
-          audio.volume = 0;
-          audio.muted = true;
-          audio.pause();
-          if (audio.srcObject) {
-            audio.srcObject.getAudioTracks().forEach((t) => (t.enabled = false));
-          }
-          clearInterval(fadeOut);
-        }
-      }, 20);
+    audio.muted = muted;
+    audio.volume = muted ? 0 : 0.7;
+
+    if (audio.srcObject) {
+      audio.srcObject.getAudioTracks().forEach((track) => {
+        track.enabled = !muted;
+      });
+    }
+
+    if (muted) {
+      audio.pause();
     } else {
-      // ✅ Smooth unmute — gradual volume increase (prevents pop/beep)
-      audio.muted = false;
-      audio.volume = 0;
-      if (audio.srcObject) {
-        audio.srcObject.getAudioTracks().forEach((t) => (t.enabled = true));
-      }
-
-      audio
-        .play()
-        .then(() => {
-          const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-          const targetVol = isMobile ? 0.7 : 0.85;
-
-          const fadeIn = setInterval(() => {
-            if (audio.volume < targetVol - 0.05) {
-              audio.volume = Math.min(targetVol, audio.volume + 0.1);
-            } else {
-              audio.volume = targetVol;
-              clearInterval(fadeIn);
-            }
-          }, 30);
-        })
-        .catch((e) => {
-          console.debug("Audio play blocked:", e);
-          // ✅ Mobile pe user gesture ke baad play karo
-          const playOnTouch = () => {
-            audio.play().catch(() => {});
-            document.removeEventListener("touchstart", playOnTouch);
-            document.removeEventListener("click", playOnTouch);
-          };
-          document.addEventListener("touchstart", playOnTouch, { once: true });
-          document.addEventListener("click", playOnTouch, { once: true });
-        });
+      audio.play().catch((e) => {
+        console.debug("Audio play deferred:", e);
+      });
     }
   }
 

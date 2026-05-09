@@ -1043,20 +1043,26 @@ resize();
 // ═══════════════════════════════════════════
 function getPos(e) {
   const rect = canvas.getBoundingClientRect();
-
-  // ✅ Touch events handle karo properly
+  
   let clientX, clientY;
 
+  // ✅ Touch event
   if (e.touches && e.touches.length > 0) {
     clientX = e.touches[0].clientX;
     clientY = e.touches[0].clientY;
-  } else if (e.changedTouches && e.changedTouches.length > 0) {
+  }
+  // ✅ Touch end event  
+  else if (e.changedTouches && e.changedTouches.length > 0) {
     clientX = e.changedTouches[0].clientX;
     clientY = e.changedTouches[0].clientY;
-  } else {
+  }
+  // ✅ Mouse / Click event
+  else {
     clientX = e.clientX;
     clientY = e.clientY;
   }
+
+  if (clientX === undefined || clientY === undefined) return null;
 
   return [
     (clientX - rect.left) * (SCREEN_W / rect.width),
@@ -1088,19 +1094,14 @@ function sendMyChatMessage(text) {
   network.sendChat(message, pName, PLAYER_COLORS[pColor]);
 }
 
-// ✅ Double-touch prevention
-let lastInputTime = 0;
-const INPUT_COOLDOWN = 350; // ms
+// Double touch prevention
+let lastInputTimestamp = 0;
+const INPUT_COOLDOWN_MS = 350;
 
-function handleInput(e, type = "up") {
+function handleInput(e) {
   const now = Date.now();
-
-  // ✅ Cooldown check — double fire prevent karo
-  if (now - lastInputTime < INPUT_COOLDOWN) {
-    console.log("🚫 Input ignored (cooldown)");
-    return;
-  }
-  lastInputTime = now;
+  if (now - lastInputTimestamp < INPUT_COOLDOWN_MS) return;
+  lastInputTimestamp = now;
 
   if (e.cancelable && e.target === canvas) e.preventDefault();
 
@@ -1286,11 +1287,24 @@ function handleInput(e, type = "up") {
     }
   }
 
-  // Mic button - enlarged hitbox for mobile (44x44 minimum)
+  // Mic button
   if (sx >= 88 && sx <= 160 && sy >= SCREEN_H - 60 && sy <= SCREEN_H - 8) {
-    network.toggleMic().then((isOn) => {
-      game.localMicMuted = !isOn;
-    });
+    
+    // ✅ Mobile safe async call
+    (async () => {
+      try {
+        const isOn = await network.toggleMic();
+        console.log("🎤 Mic toggled:", isOn);
+        
+        // ✅ Null check
+        if (typeof isOn === "boolean") {
+          game.localMicMuted = !isOn;
+        }
+      } catch (err) {
+        console.error("Mic toggle error:", err);
+      }
+    })();
+    
     return;
   }
 
@@ -1369,25 +1383,28 @@ function unlockMobileAudioOnce() {
 
 
 
-// Touch handler (primary on mobile)
-canvas.addEventListener("touchstart", (e) => {
-  unlockMobileAudioOnce();
-  if (game?.chat?.active && isEventInsideChatUI(e)) return;
-  e.preventDefault(); // ← prevents subsequent 'click' event
-  handleInput(e);
-}, { passive: false, capture: false });
+// TOUCH (Mobile)
+canvas.addEventListener(
+  "touchstart",
+  (e) => {
+    if (game?.chat?.active && isEventInsideChatUI(e)) return;
+    e.preventDefault();
+    handleInput(e);
+  },
+  { passive: false }
+);
 
-// Click handler (desktop only — skip if touch was recent)
-canvas.addEventListener("click", (e) => {
-  unlockMobileAudioOnce();
-  if (game?.chat?.active && isEventInsideChatUI(e)) return;
-
-  // ✅ If touch happened recently, skip click (it's a duplicate)
-  const now = Date.now();
-  if (now - lastInputTime < INPUT_COOLDOWN) return;
-
-  handleInput(e);
-}, { passive: false });
+// CLICK (Desktop)
+canvas.addEventListener(
+  "click",
+  (e) => {
+    if (game?.chat?.active && isEventInsideChatUI(e)) return;
+    // ✅ Skip if touch was recent (prevents double)
+    if (Date.now() - lastInputTimestamp < 350) return;
+    handleInput(e);
+  },
+  { passive: false }
+);
 
 mobileChatInput.addEventListener("input", () => {
   game.chat.inputText = mobileChatInput.value;
