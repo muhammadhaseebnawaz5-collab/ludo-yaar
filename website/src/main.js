@@ -999,8 +999,10 @@ game.startGameFromServer = function (state) {
   game.clientPlayer = network.playerColor;
   game.syncState(state);
   game.gameState = state.gameState;
-
   setCanvasInteractivity(true);
+
+  // Try to unblock audio as soon as game starts
+  if (network) network.unlockAudioContextAndRetry("game-start");
 };
 
 // Redundant startGame was removed. Direct calls to game.startGameFromServer are used instead.
@@ -1489,3 +1491,11 @@ const lastPlayerName = localStorage.getItem("ludoLastName");
 if (lastPlayerName && playerNameInput) {
   playerNameInput.value = lastPlayerName;
 }
+// ✅ GLOBAL INTERACTION FOR AUDIO UNBLOCKING
+window.addEventListener("pointerup", () => {
+    if (network) network.unlockAudioContextAndRetry("global-pointerup");
+}, { passive: true });
+
+window.addEventListener("click", () => {
+    if (network) network.unlockAudioContextAndRetry("global-click");
+}, { passive: true });

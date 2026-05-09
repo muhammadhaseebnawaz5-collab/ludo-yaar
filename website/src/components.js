@@ -109,13 +109,16 @@ export class Token {
     let x = this.px + this.offset.x;
     let y = this.py + this.offset.y;
     let scale = 1;
+    let activePulse = 0;
 
-    // Hop scaling effect (scales up to 1.25x exactly halfway through hop)
+
+    // Smooth hop scaling effect during movement
     if (this.animating && this.hopProgress > 0) {
       const hopArc = Math.sin(this.hopProgress * Math.PI);
-      scale = 1 + hopArc * 0.25;
-      y -= hopArc * 8; // Slight physical "jump" upwards in Y
+      scale = 1 + hopArc * 0.15; // Reduced from 0.25
+      y -= hopArc * 4; // Reduced from 8 for a calmer movement
     }
+
 
     const r = baseRadius * scale;
 
@@ -124,14 +127,24 @@ export class Token {
     ctx.translate(x, y);
 
     // ══════════════════════════════════════════
-    // NEW SUBTLE ACTIVE ANIMATION
+    // PREMIUM ACTIVE ANIMATION (Clean & Calm)
     // ══════════════════════════════════════════
-    if (this.isCurrentPlayer && !this.finished) {
-      if (this.isMoveable) {
-        // Very subtle scale pulse for active tokens
-        const breath = Math.sin(this.pulse * 1.5) * 0.06;
-        scale *= (1 + breath);
-      }
+    if (this.isCurrentPlayer && this.isMoveable && !this.finished && !this.animating) {
+      // 1.2s - 1.8s duration (~90 frames)
+      // Pulse scale 1.0 to 1.04
+      activePulse = Math.sin(this.pulse * 0.7) * 0.5 + 0.5; // 0 to 1
+      scale *= (1 + activePulse * 0.04);
+      
+      // Soft glow UNDER the token
+      ctx.save();
+      const glowGrad = ctx.createRadialGradient(0, 0, r * 0.5, 0, 0, r * 1.5);
+      glowGrad.addColorStop(0, "rgba(255, 255, 255, 0.15)");
+      glowGrad.addColorStop(1, "rgba(255, 255, 255, 0)");
+      ctx.fillStyle = glowGrad;
+      ctx.beginPath();
+      ctx.arc(0, 0, r * 1.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
     }
     // ══════════════════════════════════════════
 
@@ -139,21 +152,23 @@ export class Token {
     ctx.globalAlpha = 1.0;
     // ══════════════════════════════════════════
 
-    // 1. Drop Shadow for overall piece
-    ctx.shadowColor = "rgba(0, 0, 0, 0.4)";
-    ctx.shadowBlur = 4 * scale;
-    ctx.shadowOffsetY = 2 * scale;
+    // 1. Softer Drop Shadow for premium depth
+    ctx.shadowColor = "rgba(0, 0, 0, 0.22)";
+    ctx.shadowBlur = 6 * scale;
+    ctx.shadowOffsetY = 3 * scale;
     ctx.beginPath();
     ctx.arc(0, 0, r, 0, Math.PI * 2);
     ctx.fill();
     ctx.shadowBlur = 0;
     ctx.shadowOffsetY = 0;
 
-    // Outer Ring (Metallic Gold / Light Yellow) with Inner Arc Glow
+
+    // Outer Ring (Refined Metallic look)
     const ringGrad = ctx.createLinearGradient(-r, -r, r, r);
-    ringGrad.addColorStop(0, "#FFF59D"); // Light rim top
-    ringGrad.addColorStop(0.5, "#FBC02D"); // Gold body
-    ringGrad.addColorStop(1, "#F57F17"); // Dark rim bottom
+    ringGrad.addColorStop(0, "#FEF9C3"); // Softer light rim
+    ringGrad.addColorStop(0.5, "#FDE047"); // Muted Gold
+    ringGrad.addColorStop(1, "#EAB308"); // Warm Gold bottom
+
 
     ctx.fillStyle = ringGrad;
     ctx.beginPath();
@@ -174,8 +189,9 @@ export class Token {
       innerR,
     );
     baseGrad.addColorStop(0, colorLight);
-    baseGrad.addColorStop(0.7, color);
-    baseGrad.addColorStop(1, "#00000033"); // Darken edges
+    baseGrad.addColorStop(0.8, color);
+    baseGrad.addColorStop(1, "rgba(0, 0, 0, 0.12)"); // Very soft edge
+
 
     ctx.fillStyle = baseGrad;
     ctx.beginPath();
@@ -193,23 +209,28 @@ export class Token {
     ctx.fillText("♔", 0, 0);
     ctx.shadowColor = "transparent";
 
-    // 4. Glossy Overlay (Crescent on top-left)
-    ctx.fillStyle = "rgba(255, 255, 255, 0.25)";
+    // 6. Glossy Overlay (Crescent on top-left)
+    ctx.fillStyle = "rgba(255, 255, 255, 0.15)";
     ctx.beginPath();
     ctx.arc(0, 0, innerR, Math.PI, Math.PI * 1.5);
-    ctx.arc(innerR * 0.2, innerR * 0.2, innerR, Math.PI * 1.5, Math.PI, true);
+    ctx.arc(innerR * 0.1, innerR * 0.1, innerR, Math.PI * 1.5, Math.PI, true);
     ctx.fill();
 
-    // Selection / Decision Hover glow
-    if (this.selected || this.decisionPending) {
-      const pulseR = r + 4 + Math.sin(this.pulse) * 3;
-      ctx.strokeStyle = this.decisionPending
-        ? "rgba(255,215,0,0.8)"
-        : "rgba(255,255,255,0.8)";
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.arc(0, 0, pulseR, 0, Math.PI * 2);
-      ctx.stroke();
+    // 7. Subtle Shine for Finished Tokens
+    if (this.finished) {
+        const shinePos = (this.pulse * 0.5) % 8; // Cycle through
+        if (shinePos < 2) {
+            ctx.save();
+            ctx.rotate(Math.PI / 4);
+            const shineGrad = ctx.createLinearGradient(-r, 0, r, 0);
+            shineGrad.addColorStop(0, "rgba(255,255,255,0)");
+            shineGrad.addColorStop(0.5, "rgba(255,255,255,0.25)");
+            shineGrad.addColorStop(1, "rgba(255,255,255,0)");
+            ctx.fillStyle = shineGrad;
+            const sx = -r + shinePos * r;
+            ctx.fillRect(sx, -r, r * 0.4, r * 2);
+            ctx.restore();
+        }
     }
 
     ctx.restore();

@@ -32,6 +32,8 @@ export class NetworkManager {
     this.isMicOn = false;
     this.globalSpeakerEnabled = true;
     this.mutedPlayerColors = new Set();
+    this.pendingCandidates = {}; // Buffer candidates arriving before remote description
+
 
     this.onFriendInvite = null;
     this.onAutoRejoin = null;
@@ -158,19 +160,45 @@ export class NetworkManager {
       }
       const pc = this.peers[fromSocketId];
       try {
-        if (signal.sdp) {
+        if (signal.type === "offer") {
+          console.log(`📡 Received offer from ${fromSocketId}`);
           await pc.setRemoteDescription(new RTCSessionDescription(signal));
-          if (signal.type === "offer") {
-            const answer = await pc.createAnswer();
-            await pc.setLocalDescription(answer);
-            this.socket.emit("voice-signal", {
-              roomId: this.roomId,
-              toSocketId: fromSocketId,
-              signal: answer,
-            });
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+          this.socket.emit("voice-signal", {
+            roomId: this.roomId,
+            toSocketId: fromSocketId,
+            signal: answer,
+          });
+
+          // Process buffered candidates
+          if (this.pendingCandidates[fromSocketId]) {
+            console.log(`❄️ Processing ${this.pendingCandidates[fromSocketId].length} buffered candidates for ${fromSocketId}`);
+            for (const cand of this.pendingCandidates[fromSocketId]) {
+              await pc.addIceCandidate(new RTCIceCandidate(cand));
+            }
+            delete this.pendingCandidates[fromSocketId];
           }
-        } else if (signal.candidate) {
-          await pc.addIceCandidate(new RTCIceCandidate(signal));
+        } else if (signal.type === "answer") {
+          console.log(`📡 Received answer from ${fromSocketId}`);
+          await pc.setRemoteDescription(new RTCSessionDescription(signal));
+          
+          // Process buffered candidates
+          if (this.pendingCandidates[fromSocketId]) {
+            console.log(`❄️ Processing ${this.pendingCandidates[fromSocketId].length} buffered candidates for ${fromSocketId}`);
+            for (const cand of this.pendingCandidates[fromSocketId]) {
+              await pc.addIceCandidate(new RTCIceCandidate(cand));
+            }
+            delete this.pendingCandidates[fromSocketId];
+          }
+        } else if (signal.candidate || signal.sdpMid !== undefined) {
+          if (pc.remoteDescription && pc.remoteDescription.type) {
+            await pc.addIceCandidate(new RTCIceCandidate(signal));
+          } else {
+            if (!this.pendingCandidates[fromSocketId]) this.pendingCandidates[fromSocketId] = [];
+            this.pendingCandidates[fromSocketId].push(signal);
+            console.log(`❄️ Buffered candidate from ${fromSocketId}`);
+          }
         }
       } catch (e) {
         console.error("Signaling error", e);
@@ -541,7 +569,12 @@ export class NetworkManager {
       iceServers: [
         { urls: "stun:stun.l.google.com:19302" },
         { urls: "stun:stun1.l.google.com:19302" },
+        { urls: "stun:stun2.l.google.com:19302" },
+        { urls: "stun:stun3.l.google.com:19302" },
+        { urls: "stun:stun4.l.google.com:19302" },
       ],
+      iceTransportPolicy: "all",
+      iceCandidatePoolSize: 10,
     });
     this.peers[targetSocketId] = pc;
 
@@ -556,13 +589,10 @@ export class NetworkManager {
     }
 
     pc.oniceconnectionstatechange = () => {
-      console.log(`❄️ ICE state for ${targetSocketId}: ${pc.iceConnectionState}`);
-      if (
-        pc.iceConnectionState === "disconnected" ||
-        pc.iceConnectionState === "failed" ||
-        pc.iceConnectionState === "closed"
-      ) {
-        // Handle disconnection logic if needed
+      console.log(`❄️ ICE [${targetSocketId}]: ${pc.iceConnectionState}`);
+      if (pc.iceConnectionState === "failed") {
+        console.warn("ICE failed, restarting...");
+        pc.restartIce().catch(e => console.error("ICE Restart failed:", e));
       }
     };
 
@@ -629,7 +659,7 @@ export class NetworkManager {
     };
 
     pc.onconnectionstatechange = () => {
-      console.log(`Connection [${targetSocketId}]: ${pc.connectionState}`);
+      console.log(`🤝 Connection [${targetSocketId}]: ${pc.connectionState}`);
       if (
         pc.connectionState === "failed" ||
         pc.connectionState === "closed"

@@ -10,14 +10,14 @@ export const COLORS = {
     BOARD_BORDER: '#2C3E50', // Modern border
     WHITE: '#FFFFFF',
     BLACK: '#000000',
-    GREEN: '#00D147', // Vibrant Green
-    YELLOW: '#FFD700', // Vibrant Gold/Yellow
-    RED: '#FF3131', // Bright Vibrant Red (No dark shade)
-    BLUE: '#00A8FF', // Vibrant Azure Blue
-    LIGHT_GREEN: '#2ECC71',
-    LIGHT_YELLOW: '#F1C40F',
-    LIGHT_RED: '#FF5C5C',
-    LIGHT_BLUE: '#3498DB',
+    GREEN: '#43A047', // Clean balanced Green
+    YELLOW: '#FBC02D', // Warm Golden Yellow
+    RED: '#E53935', // Modern Red (Not too bright)
+    BLUE: '#1E88E5', // Professional Blue
+    LIGHT_GREEN: '#81C784',
+    LIGHT_YELLOW: '#FFF176',
+    LIGHT_RED: '#E57373',
+    LIGHT_BLUE: '#64B5F6',
     DARK_GREEN: '#009432',
     DARK_YELLOW: '#D4AF37',
     DARK_RED: '#C0392B',
