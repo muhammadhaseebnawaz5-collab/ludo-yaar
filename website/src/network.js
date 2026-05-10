@@ -73,6 +73,7 @@ export class NetworkManager {
     });
 
     this.socket.on("room-update", (data) => {
+      const oldSocketIds = { ...this.socketIds };
       this.socketIds = {};
       this.socketIdColors = {};
       data.players.forEach((p) => {
@@ -83,6 +84,16 @@ export class NetworkManager {
       });
       this.applyRemoteAudioMuteStates();
       this.game.updateLobbyPlayers(data);
+
+      // ✅ PROACTIVE: If my mic is on, connect to any new socket IDs
+      if (this.isMicOn || this.localStream) {
+        Object.values(this.socketIds).forEach((sid) => {
+          if (sid !== this.socket.id && !this.peers[sid]) {
+            console.log(`🆕 New player detected in room-update, connecting to ${sid}`);
+            this.createPeerConnection(sid, true);
+          }
+        });
+      }
     });
 
     this.socket.on("game-started", (state) => {
@@ -155,10 +166,16 @@ export class NetworkManager {
 
     this.socket.on("voice-signal", async ({ fromSocketId, signal }) => {
       if (!fromSocketId || fromSocketId === this.socket.id) return;
+      
+      // If we receive a signal and don't have a peer, create one as non-initiator
       if (!this.peers[fromSocketId]) {
+        console.log(`📞 Signaling received from new peer ${fromSocketId}, creating connection`);
         this.createPeerConnection(fromSocketId, false);
       }
+      
       const pc = this.peers[fromSocketId];
+      if (!pc) return;
+
       try {
         if (signal.type === "offer") {
           console.log(`📡 Received offer from ${fromSocketId}`);
@@ -175,7 +192,7 @@ export class NetworkManager {
           if (this.pendingCandidates[fromSocketId]) {
             console.log(`❄️ Processing ${this.pendingCandidates[fromSocketId].length} buffered candidates for ${fromSocketId}`);
             for (const cand of this.pendingCandidates[fromSocketId]) {
-              await pc.addIceCandidate(new RTCIceCandidate(cand));
+              await pc.addIceCandidate(new RTCIceCandidate(cand)).catch(e => console.warn("Buffered ICE error:", e));
             }
             delete this.pendingCandidates[fromSocketId];
           }
@@ -187,13 +204,15 @@ export class NetworkManager {
           if (this.pendingCandidates[fromSocketId]) {
             console.log(`❄️ Processing ${this.pendingCandidates[fromSocketId].length} buffered candidates for ${fromSocketId}`);
             for (const cand of this.pendingCandidates[fromSocketId]) {
-              await pc.addIceCandidate(new RTCIceCandidate(cand));
+              await pc.addIceCandidate(new RTCIceCandidate(cand)).catch(e => console.warn("Buffered ICE error:", e));
             }
             delete this.pendingCandidates[fromSocketId];
           }
         } else if (signal.candidate || signal.sdpMid !== undefined) {
           if (pc.remoteDescription && pc.remoteDescription.type) {
-            await pc.addIceCandidate(new RTCIceCandidate(signal));
+            await pc.addIceCandidate(new RTCIceCandidate(signal)).catch(e => {
+              if (e.name !== "OperationError") console.warn("ICE candidate error:", e);
+            });
           } else {
             if (!this.pendingCandidates[fromSocketId]) this.pendingCandidates[fromSocketId] = [];
             this.pendingCandidates[fromSocketId].push(signal);
@@ -201,7 +220,7 @@ export class NetworkManager {
           }
         }
       } catch (e) {
-        console.error("Signaling error", e);
+        console.error("❌ Signaling error:", e);
       }
     });
 
@@ -264,6 +283,9 @@ export class NetworkManager {
       });
     }
     this.clearStoredSession();
+    
+    // Cleanup all peer connections
+    Object.keys(this.peers).forEach(sid => this.cleanupPeerConnection(sid));
   }
 
   createRoom(name, count, teamUpMode, callback) {
@@ -402,6 +424,7 @@ export class NetworkManager {
     // ✅ Check if we are in a secure context (HTTPS)
     if (typeof window !== "undefined" && (!window.isSecureContext || !navigator.mediaDevices)) {
       console.error("❌ Mic blocked: HTTPS is REQUIRED for mobile voice chat.");
+      alert("Voice chat ke liye HTTPS zaroori hai.");
       return false;
     }
 
@@ -426,30 +449,43 @@ export class NetworkManager {
         this.localStream.getAudioTracks().forEach((track) => {
           console.log("🎤 Local track:", track.label, "state:", track.readyState);
           track.enabled = true;
+          
+          // Handle track ended unexpectedly
+          track.onended = () => {
+            console.warn("🎤 Local track ended unexpectedly");
+            if (this.isMicOn) {
+              this.localStream = null;
+              this.isMicOn = false;
+              this.broadcastVoiceStatus();
+            }
+          };
         });
 
-        // ✅ LOCAL AUDIO logic removed to prevent echo
         this.isMicOn = true;
         this.broadcastVoiceStatus();
+        
+        // Add tracks to existing peer connections
         this.addLocalTracksToPeers();
 
-        // ✅ Naye peers banao jo abhi connected hain
+        // ✅ If we have a local stream, ensure we are connected to everyone
         Object.values(this.socketIds).forEach((sid) => {
           if (sid !== this.socket.id && !this.peers[sid]) {
+            console.log(`🎤 Mic ON: Initiating connection to existing peer ${sid}`);
             this.createPeerConnection(sid, true);
           }
         });
 
       } catch (e) {
         console.error("❌ Mic access denied:", e);
+        alert("Microphone access nahi mila. Settings check karein.");
         return false;
       }
     } else {
-      // ✅ Robust Toggle
+      // ✅ Toggle existing tracks
       this.isMicOn = !this.isMicOn;
       this.localStream.getAudioTracks().forEach((track) => {
         track.enabled = this.isMicOn;
-        // If track died (common on some mobile browsers after long mute), we need to re-acquire
+        // If track died, we need to re-acquire
         if (this.isMicOn && track.readyState === 'ended') {
           this.localStream = null;
           return this.toggleMic();
@@ -502,7 +538,7 @@ export class NetworkManager {
       (color !== undefined && this.mutedPlayerColors.has(color));
 
     audio.muted = muted;
-    audio.volume = muted ? 0 : 0.6; // Slightly reduced volume (0.7 -> 0.6)
+    audio.volume = muted ? 0 : 0.85; // Increased volume from 0.6 -> 0.85
 
     if (audio.srcObject) {
       audio.srcObject.getAudioTracks().forEach((track) => {
@@ -512,13 +548,11 @@ export class NetworkManager {
 
     if (muted) {
       audio.pause();
-    } else {
-      // ✅ Ensure volume is set before play
-      audio.volume = 0.6;
-      audio.muted = false;
+    } else if (audio.srcObject) {
       audio.play().catch((e) => {
-        console.debug("Audio play deferred (waiting for gesture):", e);
-        // Will be retried on next touch/click via unlockAudioContextAndRetry
+        if (e.name !== "AbortError") {
+          console.debug("Audio play deferred (waiting for gesture):", e);
+        }
       });
     }
   }
@@ -526,20 +560,17 @@ export class NetworkManager {
   addLocalTracksToPeers() {
     if (!this.localStream) return;
     const localTrack = this.localStream.getAudioTracks()[0];
-    if (!localTrack) {
-      console.warn("❌ No local audio track found");
-      return;
-    }
+    if (!localTrack) return;
 
     Object.entries(this.peers).forEach(([socketId, pc]) => {
       try {
-        const audioSender = pc
-          .getSenders()
-          .find((s) => s.track && s.track.kind === "audio");
+        const senders = pc.getSenders();
+        const audioSender = senders.find((s) => s.track && s.track.kind === "audio");
+        
         if (audioSender) {
           console.log("🔄 Replacing audio track for", socketId);
-          audioSender.replaceTrack(localTrack).catch((e) => {
-            console.error("Replace track error:", e);
+          audioSender.replaceTrack(localTrack).catch(e => {
+            console.warn("replaceTrack failed, adding normally:", e);
             pc.addTrack(localTrack, this.localStream);
           });
         } else {
@@ -553,17 +584,14 @@ export class NetworkManager {
   }
 
   createPeerConnection(targetSocketId, isInitiator) {
-    // ✅ Hard protection against duplicates
     if (this.peers[targetSocketId]) {
       console.warn("Peer already exists, skipping:", targetSocketId);
       return;
     }
 
-    // ✅ Don't connect to yourself
-    if (targetSocketId === this.socket.id) {
-      console.warn("Skipping self-connection");
-      return;
-    }
+    if (targetSocketId === this.socket.id) return;
+
+    console.log(`🤝 Creating PeerConnection for ${targetSocketId} (initiator: ${isInitiator})`);
 
     const pc = new RTCPeerConnection({
       iceServers: [
@@ -572,27 +600,27 @@ export class NetworkManager {
         { urls: "stun:stun2.l.google.com:19302" },
         { urls: "stun:stun3.l.google.com:19302" },
         { urls: "stun:stun4.l.google.com:19302" },
+        { urls: "stun:stun.services.mozilla.com" },
+        { urls: "stun:stun.xten.com" },
       ],
       iceTransportPolicy: "all",
       iceCandidatePoolSize: 10,
     });
     this.peers[targetSocketId] = pc;
 
-    // Data Channel for Chat
-    if (isInitiator) {
-      const dc = pc.createDataChannel("chat");
-      this.setupDataChannel(targetSocketId, dc);
-    } else {
-      pc.ondatachannel = (event) => {
-        this.setupDataChannel(targetSocketId, event.channel);
-      };
-    }
-
-    pc.oniceconnectionstatechange = () => {
-      console.log(`❄️ ICE [${targetSocketId}]: ${pc.iceConnectionState}`);
-      if (pc.iceConnectionState === "failed") {
-        console.warn("ICE failed, restarting...");
-        pc.restartIce().catch(e => console.error("ICE Restart failed:", e));
+    // ✅ NEGOTIATION NEEDED: Crucial for adding tracks later
+    pc.onnegotiationneeded = async () => {
+      try {
+        console.log(`🔄 Negotiation needed for ${targetSocketId}`);
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        this.socket.emit("voice-signal", {
+          roomId: this.roomId,
+          toSocketId: targetSocketId,
+          signal: pc.localDescription,
+        });
+      } catch (e) {
+        console.error("Negotiation error:", e);
       }
     };
 
@@ -607,96 +635,68 @@ export class NetworkManager {
     };
 
     pc.ontrack = (event) => {
-      if (targetSocketId === this.socket.id) return;
-
       const remoteStream = event.streams[0];
       if (!remoteStream) return;
 
+      console.log(`📡 Remote track received from ${targetSocketId}`);
+      
       let audio = this.remoteAudioEls[targetSocketId];
-
       if (!audio) {
         audio = new Audio();
-
-        // ✅ Mobile-specific audio settings
-        const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-
         audio.autoplay = true;
         audio.playsInline = true;
         audio.setAttribute("playsinline", "");
         audio.setAttribute("webkit-playsinline", "");
-
-        // ✅ Mobile pe earpiece instead of speaker (prevents echo)
-        if (isMobile && audio.setSinkId) {
-          // Try to use earpiece on mobile
-          audio.setSinkId("").catch(() => {});
-        }
-
-        audio.volume = isMobile ? 0.6 : 0.75;
-        audio.muted = false;
-
         this.remoteAudioEls[targetSocketId] = audio;
-        console.log(`🔊 Created new audio element for ${targetSocketId}`);
       }
-
-      console.log(`📡 Remote track received from ${targetSocketId}, tracks:`, remoteStream.getAudioTracks().length);
 
       if (audio.srcObject !== remoteStream) {
-        audio.pause();
-        audio.srcObject = null;
         audio.srcObject = remoteStream;
-        console.log(`📡 Attached remote stream to audio element for ${targetSocketId}`);
       }
-
+      
       this.applyRemoteAudioMuteState(targetSocketId);
     };
 
     pc.oniceconnectionstatechange = () => {
-      console.log(`ICE [${targetSocketId}]: ${pc.iceConnectionState}`);
+      console.log(`❄️ ICE [${targetSocketId}]: ${pc.iceConnectionState}`);
       if (pc.iceConnectionState === "failed") {
-        console.warn("ICE failed, restarting...");
-        pc.restartIce();
+        console.warn("ICE failed, attempting restart...");
+        pc.restartIce().catch(e => console.error("ICE Restart failed:", e));
       }
     };
 
     pc.onconnectionstatechange = () => {
       console.log(`🤝 Connection [${targetSocketId}]: ${pc.connectionState}`);
-      if (
-        pc.connectionState === "failed" ||
-        pc.connectionState === "closed"
-      ) {
+      if (pc.connectionState === "failed" || pc.connectionState === "closed") {
         this.cleanupPeerConnection(targetSocketId);
       }
     };
 
-    // ✅ Add local tracks if mic is already on
+    // Add local tracks if we have them
     if (this.localStream) {
-      console.log(`➕ Adding local tracks to new peer ${targetSocketId}`);
       this.localStream.getAudioTracks().forEach((track) => {
-        const alreadyAdded = pc
-          .getSenders()
-          .find((s) => s.track === track);
-        if (!alreadyAdded) {
-          pc.addTrack(track, this.localStream);
-        }
+        pc.addTrack(track, this.localStream);
       });
     }
 
+    // Data Channel
     if (isInitiator) {
-      console.log(`📡 Creating offer for ${targetSocketId}`);
-      pc.createOffer()
-        .then((offer) => {
-          console.log(`📡 Created offer for ${targetSocketId}, setting local description`);
-          return pc.setLocalDescription(offer);
-        })
-        .then(() => {
-          console.log(`📡 Sending offer to ${targetSocketId}`);
-          this.socket.emit("voice-signal", {
-            roomId: this.roomId,
-            toSocketId: targetSocketId,
-            signal: pc.localDescription,
-          });
-        })
-        .catch((e) => console.error("Offer creation failed:", e));
+      const dc = pc.createDataChannel("chat", { negotiated: false });
+      this.setupDataChannel(targetSocketId, dc);
+    } else {
+      pc.ondatachannel = (event) => {
+        this.setupDataChannel(targetSocketId, event.channel);
+      };
+    }
+
+    // Only create manual offer if we are initiator and didn't trigger negotiationneeded yet
+    if (isInitiator) {
+      setTimeout(() => {
+        if (pc.signalingState === "stable") {
+          console.log(`📡 Manual negotiation trigger for ${targetSocketId}`);
+          pc.onnegotiationneeded();
+        }
+      }, 100);
     }
   }
 
@@ -704,22 +704,28 @@ export class NetworkManager {
     this.dataChannels[sid] = dc;
     dc.onopen = () => console.log(`DataChannel [${sid}] is OPEN`);
     dc.onmessage = (e) => {
-      const data = JSON.parse(e.data);
-      if (data.type === "chat") {
-        if (data.senderId && data.senderId === this.sessionId) return;
-        this.game.chat.addMessage(data.sender, data.text, data.color);
-        const senderPlayerId = Number.isInteger(data.playerId)
-          ? data.playerId
-          : data.sender;
-        this.game.showAvatarMessage(senderPlayerId, data.text);
+      try {
+        const data = JSON.parse(e.data);
+        if (data.type === "chat") {
+          if (data.senderId && data.senderId === this.sessionId) return;
+          this.game.chat.addMessage(data.sender, data.text, data.color);
+          const senderPlayerId = Number.isInteger(data.playerId) ? data.playerId : data.sender;
+          this.game.showAvatarMessage(senderPlayerId, data.text);
+        }
+      } catch (e) {
+        console.warn("DataChannel message error:", e);
       }
     };
     dc.onclose = () => console.log(`DataChannel [${sid}] is CLOSED`);
   }
 
   cleanupPeerConnection(targetSocketId) {
+    console.log(`🧹 Cleaning up connection for ${targetSocketId}`);
     const pc = this.peers[targetSocketId];
     if (pc) {
+      pc.onnegotiationneeded = null;
+      pc.onicecandidate = null;
+      pc.ontrack = null;
       pc.close();
       delete this.peers[targetSocketId];
     }
@@ -736,8 +742,6 @@ export class NetworkManager {
       dc.close();
       delete this.dataChannels[targetSocketId];
     }
-
-    console.log(`Cleaned up connection for ${targetSocketId}`);
   }
 
   unlockAudioContextAndRetry(reason = "unknown") {
