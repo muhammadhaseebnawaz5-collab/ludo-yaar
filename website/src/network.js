@@ -434,14 +434,19 @@ export class NetworkManager {
 
         this.localStream = await navigator.mediaDevices.getUserMedia({
           audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true,
+            echoCancellation: { ideal: true },
+            noiseSuppression: { ideal: true },
+            autoGainControl: { ideal: true },
             channelCount: 1,
             sampleRate: isMobile ? 16000 : 44100,
+            latency: 0,
+            // Chrome specific legacy flags for extra echo protection
             googEchoCancellation: true,
             googAutoGainControl: true,
             googNoiseSuppression: true,
+            googHighpassFilter: true,
+            googTypingNoiseDetection: true,
+            googAudioMirroring: false
           },
         });
 
@@ -538,7 +543,8 @@ export class NetworkManager {
       (color !== undefined && this.mutedPlayerColors.has(color));
 
     audio.muted = muted;
-    audio.volume = muted ? 0 : 0.85; // Increased volume from 0.6 -> 0.85
+    // Lowered volume (0.85 -> 0.65) to prevent physical echo loop
+    audio.volume = muted ? 0 : 0.65; 
 
     if (audio.srcObject) {
       audio.srcObject.getAudioTracks().forEach((track) => {
