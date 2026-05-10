@@ -1115,6 +1115,24 @@ function handleInput(e) {
   if (!pos) return;
   const [sx, sy] = pos;
 
+  // --- VICTORY SCREEN BUTTONS ---
+  if (game.winner !== null) {
+    if (game.winPlayAgainRect &&
+        sx >= game.winPlayAgainRect.x && sx <= game.winPlayAgainRect.x + game.winPlayAgainRect.w &&
+        sy >= game.winPlayAgainRect.y && sy <= game.winPlayAgainRect.y + game.winPlayAgainRect.h) {
+      if (network) network.startGame();
+      return;
+    }
+    if (game.winHomeRect &&
+        sx >= game.winHomeRect.x && sx <= game.winHomeRect.x + game.winHomeRect.w &&
+        sy >= game.winHomeRect.y && sy <= game.winHomeRect.y + game.winHomeRect.h) {
+      if (network) network.leaveRoom();
+      window.location.reload(); // Go back to start
+      return;
+    }
+    return; // Don't allow other clicks while winner screen is up
+  }
+
   // Heartbeat to reset server-side auto-turn timer
   if (network) network.sendActivity();
 

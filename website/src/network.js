@@ -434,11 +434,11 @@ export class NetworkManager {
 
         this.localStream = await navigator.mediaDevices.getUserMedia({
           audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true,
+            echoCancellation: { ideal: true },
+            noiseSuppression: { ideal: true },
+            autoGainControl: { ideal: true },
             channelCount: 1,
-            // Removed complex flags that caused connection failure
+            latency: 0,
           },
         });
 
@@ -535,8 +535,8 @@ export class NetworkManager {
       (color !== undefined && this.mutedPlayerColors.has(color));
 
     audio.muted = muted;
-    // Lowered volume (0.85 -> 0.65) to prevent physical echo loop
-    audio.volume = muted ? 0 : 0.65; 
+    // Lowered volume to 0.6 to prevent speaker feedback loop
+    audio.volume = muted ? 0 : 0.6; 
 
     if (audio.srcObject) {
       audio.srcObject.getAudioTracks().forEach((track) => {
@@ -657,15 +657,16 @@ export class NetworkManager {
 
     pc.oniceconnectionstatechange = () => {
       console.log(`❄️ ICE [${targetSocketId}]: ${pc.iceConnectionState}`);
-      if (pc.iceConnectionState === "failed") {
-        console.warn("ICE failed, attempting restart...");
-        pc.restartIce().catch(e => console.error("ICE Restart failed:", e));
+      if (pc.iceConnectionState === "failed" || pc.iceConnectionState === "disconnected") {
+        console.warn("⚠️ ICE Connection lost/failed. Attempting to recover...");
+        pc.restartIce().catch(e => console.error("❌ ICE Restart failed:", e));
       }
     };
 
     pc.onconnectionstatechange = () => {
-      console.log(`🤝 Connection [${targetSocketId}]: ${pc.connectionState}`);
-      if (pc.connectionState === "failed" || pc.connectionState === "closed") {
+      console.log(`🤝 PeerConnection [${targetSocketId}]: ${pc.connectionState}`);
+      if (pc.connectionState === "failed") {
+        console.warn("❌ PeerConnection failed, cleaning up...");
         this.cleanupPeerConnection(targetSocketId);
       }
     };

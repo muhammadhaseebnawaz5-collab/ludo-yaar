@@ -1648,13 +1648,30 @@ export class LudoGame {
     ctx.font = "bold 20px Arial";
     ctx.fillText(winName, SCREEN_W / 2, 355);
 
-    ctx.fillStyle = COLORS.GREEN;
+    const bw = 140, bh = 46;
+    const spacing = 15;
+    const startX = SCREEN_W / 2 - (bw * 2 + spacing) / 2;
+    const by = 420;
+
+    // --- PLAY AGAIN ---
+    this.winPlayAgainRect = { x: startX, y: by, w: bw, h: bh };
+    ctx.fillStyle = "#4CAF50";
     ctx.beginPath();
-    ctx.roundRect(SCREEN_W / 2 - 70, 420, 140, 50, 14);
+    ctx.roundRect(startX, by, bw, bh, 12);
     ctx.fill();
-    ctx.fillStyle = COLORS.WHITE;
-    ctx.font = "bold 18px Arial";
-    ctx.fillText("Play Again", SCREEN_W / 2, 451);
+    ctx.fillStyle = "#FFF";
+    ctx.font = "bold 16px Arial";
+    ctx.fillText("Play Again", startX + bw/2, by + 29);
+
+    // --- HOME ---
+    this.winHomeRect = { x: startX + bw + spacing, y: by, w: bw, h: bh };
+    ctx.fillStyle = "#FF5722";
+    ctx.beginPath();
+    ctx.roundRect(startX + bw + spacing, by, bw, bh, 12);
+    ctx.fill();
+    ctx.fillStyle = "#FFF";
+    ctx.font = "bold 16px Arial";
+    ctx.fillText("Home", startX + bw + spacing + bw/2, by + 29);
   }
 
   // ─── NETWORK SYNC METHODS ────────────────────────────────────────
@@ -1695,8 +1712,10 @@ export class LudoGame {
       clearTimeout(this.pendingDiceRollTimer);
       this.pendingDiceRollTimer = null;
     }
-    if (state.winner !== null && state.winner !== undefined) {
+    if (state.winner !== undefined) {
       this.winner = state.winner;
+    } else {
+      this.winner = null;
     }
     if (state.leftPlayers) {
         this.leftPlayers = state.leftPlayers;
