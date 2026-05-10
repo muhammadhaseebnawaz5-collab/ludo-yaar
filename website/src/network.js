@@ -434,19 +434,11 @@ export class NetworkManager {
 
         this.localStream = await navigator.mediaDevices.getUserMedia({
           audio: {
-            echoCancellation: { ideal: true },
-            noiseSuppression: { ideal: true },
-            autoGainControl: { ideal: true },
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
             channelCount: 1,
-            sampleRate: isMobile ? 16000 : 44100,
-            latency: 0,
-            // Chrome specific legacy flags for extra echo protection
-            googEchoCancellation: true,
-            googAutoGainControl: true,
-            googNoiseSuppression: true,
-            googHighpassFilter: true,
-            googTypingNoiseDetection: true,
-            googAudioMirroring: false
+            // Removed complex flags that caused connection failure
           },
         });
 

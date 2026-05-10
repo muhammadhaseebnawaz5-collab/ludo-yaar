@@ -89,7 +89,8 @@ export class Token {
       // Roll based dynamic speed: Roll 1-2 -> normal (~0.12), Roll 5-6 -> faster (~0.2)
       // Since we don't have the roll here easily, we'll just use a faster baseline
       // and maybe check if moveQueue is long.
-      const speed = this.moveQueue.length > 3 ? 0.22 : 0.16;
+      // 🚀 SLOWER & SMOOTHER MOVEMENT
+      const speed = this.moveQueue.length > 3 ? 0.16 : 0.12;
       this.hopProgress += speed;
 
       if (this.hopProgress >= 1) {
@@ -130,21 +131,33 @@ export class Token {
     // PREMIUM ACTIVE ANIMATION (Clean & Calm)
     // ══════════════════════════════════════════
     if (this.isCurrentPlayer && this.isMoveable && !this.finished && !this.animating) {
-      // 1.2s - 1.8s duration (~90 frames)
-      // Pulse scale 1.0 to 1.04
-      activePulse = Math.sin(this.pulse * 0.7) * 0.5 + 0.5; // 0 to 1
-      scale *= (1 + activePulse * 0.04);
+      // ══════════════════════════════════════════
+      // PREMIUM ACTIVE ANIMATION (Matching User Screenshot)
+      // ══════════════════════════════════════════
+      activePulse = Math.sin(this.pulse * 0.8) * 0.5 + 0.5; // 0 to 1
+      scale *= (1 + activePulse * 0.05);
       
-      // Soft glow UNDER the token
+      // Prominent White Outer Glow
       ctx.save();
-      const glowGrad = ctx.createRadialGradient(0, 0, r * 0.5, 0, 0, r * 1.5);
-      glowGrad.addColorStop(0, "rgba(255, 255, 255, 0.15)");
+      const glowGrad = ctx.createRadialGradient(0, 0, r * 0.6, 0, 0, r * 1.8);
+      glowGrad.addColorStop(0, "rgba(255, 255, 255, 0.4)"); // Higher opacity
+      glowGrad.addColorStop(0.5, "rgba(255, 255, 255, 0.2)");
       glowGrad.addColorStop(1, "rgba(255, 255, 255, 0)");
       ctx.fillStyle = glowGrad;
       ctx.beginPath();
-      ctx.arc(0, 0, r * 1.5, 0, Math.PI * 2);
+      ctx.arc(0, 0, r * 1.8, 0, Math.PI * 2);
       ctx.fill();
       ctx.restore();
+
+      // Inner pulsating white ring
+      ctx.save();
+      ctx.strokeStyle = `rgba(255, 255, 255, ${0.4 + activePulse * 0.4})`;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(0, 0, r + 2, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+      // ══════════════════════════════════════════
     }
     // ══════════════════════════════════════════
 
